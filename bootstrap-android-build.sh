@@ -559,11 +559,12 @@ check_java_version() {
     local major_version
     major_version=$(echo "$java_version" | cut -d. -f1)
 
-    if [ "$major_version" -ge 17 ]; then
+    # Gradle build requires Java 17 specifically
+    if [ "$major_version" -eq 17 ]; then
         print_success "Java version: $java_version (compatible)"
         return 0
     else
-        print_error "Java version: $java_version (require 17 or higher)"
+        print_warning "Java version: $java_version (found), but Gradle requires Java 17 specifically"
         return 1
     fi
 }
