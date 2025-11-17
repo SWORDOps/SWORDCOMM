@@ -77,7 +77,10 @@ log_message() {
 }
 
 pause_for_input() {
-    read -p "Press Enter to continue..."
+    # Only pause if in interactive mode
+    if [ "${INTERACTIVE_MODE:-true}" = true ]; then
+        read -p "Press Enter to continue..."
+    fi
 }
 
 select_option() {
@@ -491,6 +494,8 @@ EOF
 main() {
     # Parse command line arguments
     local interactive=true
+    INTERACTIVE_MODE=true  # Global flag for pause_for_input
+
     while [[ $# -gt 0 ]]; do
         case $1 in
             --help)
@@ -499,6 +504,7 @@ main() {
                 ;;
             --no-interactive)
                 interactive=false
+                INTERACTIVE_MODE=false
                 shift
                 ;;
             --variant)
@@ -548,7 +554,6 @@ main() {
     else
         print_info "Using default/provided settings..."
         echo "Build Variant: $BUILD_VARIANT"
-        pause_for_input
     fi
 
     # Run build

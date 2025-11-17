@@ -536,7 +536,10 @@ function Main {
         exit 1
     }
 
-    Read-Host "Press Enter to continue"
+    # Only pause in interactive mode
+    if (-not $NoInteractive) {
+        Read-Host "Press Enter to continue"
+    }
 
     # Interactive menu
     if (-not $NoInteractive) {
@@ -547,7 +550,6 @@ function Main {
     else {
         Write-Info "Using default/provided settings..."
         Write-Host "Build Variant: $script:BuildVariant"
-        Read-Host "Press Enter to start build"
     }
 
     # Run build
