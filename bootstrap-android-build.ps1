@@ -203,6 +203,12 @@ function Verify-SdkInstallation {
         return $false
     }
 
+    # Check adb binary directly instead of via PATH (PATH not updated yet during first install)
+    if (-not (Test-Path "$AndroidHome\platform-tools\adb.exe")) {
+        Add-Error "ADB tool not found at $AndroidHome\platform-tools\adb.exe"
+        return $false
+    }
+
     Write-Success "Android SDK installation verified"
     return $true
 }
