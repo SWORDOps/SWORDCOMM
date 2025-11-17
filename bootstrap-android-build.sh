@@ -233,7 +233,12 @@ verify_sdk_installation() {
     validate_directory "$sdk_root/platforms" "SDK platforms" || return 1
     validate_directory "$sdk_root/build-tools" "Build tools" || return 1
     validate_directory "$sdk_root/ndk" "NDK" || return 1
-    validate_executable "adb" "ADB tool" || return 1
+
+    # Check adb binary directly instead of via PATH (PATH not updated yet during first install)
+    if [ ! -f "$sdk_root/platform-tools/adb" ]; then
+        add_error "ADB tool not found at $sdk_root/platform-tools/adb"
+        return 1
+    fi
 
     print_success "Android SDK installation verified"
     return 0
