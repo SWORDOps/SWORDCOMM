@@ -31,7 +31,7 @@
 #
 ################################################################################
 
-set -euo pipefail
+set -o pipefail
 
 # Color codes for output
 RED='\033[0;31m'
@@ -42,6 +42,7 @@ NC='\033[0m' # No Color
 
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOG_FILE="$SCRIPT_DIR/bootstrap-build.log"
 JAVA_VERSION="17"
 JAVA_BUILD_VERSION="17.0.13_11"
 ANDROID_SDK_VERSION="35"
@@ -49,6 +50,12 @@ ANDROID_BUILD_TOOLS="35.0.0"
 ANDROID_NDK_VERSION="28.0.13004108"
 GRADLE_VERSION="8.9"
 GRADLE_WRAPPER_VERSION="8.9.0"
+MAX_RETRIES=4
+RETRY_DELAY=2
+
+# Error tracking
+ERRORS=()
+EXIT_CODE=0
 
 # Determine OS
 OS="unknown"
@@ -111,6 +118,127 @@ print_step() {
     echo -e "\n${YELLOW}→ $1${NC}"
 }
 
+log_message() {
+    local level="$1"
+    shift
+    local message="$@"
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] [$level] $message" >> "$LOG_FILE"
+}
+
+add_error() {
+    local error="$1"
+    ERRORS+=("$error")
+    log_message "ERROR" "$error"
+}
+
+cleanup_on_error() {
+    print_error "Script failed with errors"
+    echo ""
+    if [ ${#ERRORS[@]} -gt 0 ]; then
+        echo "Errors encountered:"
+        printf '%s\n' "${ERRORS[@]}" | sed 's/^/  ✗ /'
+    fi
+    echo ""
+    print_info "Full log saved to: $LOG_FILE"
+    echo "  Run: tail -f $LOG_FILE"
+    exit 1
+}
+
+trap cleanup_on_error ERR
+
+retry_with_backoff() {
+    local max_attempts="$MAX_RETRIES"
+    local delay="$RETRY_DELAY"
+    local attempt=1
+
+    while [ $attempt -le $max_attempts ]; do
+        if "$@"; then
+            return 0
+        fi
+
+        if [ $attempt -lt $max_attempts ]; then
+            print_warning "Attempt $attempt failed, retrying in ${delay}s... (attempt $((attempt+1))/$max_attempts)"
+            sleep "$delay"
+            delay=$((delay * 2))
+        fi
+        attempt=$((attempt + 1))
+    done
+
+    print_error "Command failed after $max_attempts attempts: $@"
+    return 1
+}
+
+download_with_retry() {
+    local url="$1"
+    local output="$2"
+
+    retry_with_backoff curl -L "$url" -o "$output" --progress-bar --retry 3 --retry-delay 1 -f
+}
+
+validate_executable() {
+    local cmd="$1"
+    local friendly_name="${2:-$cmd}"
+
+    if ! command -v "$cmd" &> /dev/null; then
+        add_error "$friendly_name not found in PATH"
+        return 1
+    fi
+    return 0
+}
+
+validate_file() {
+    local filepath="$1"
+    local friendly_name="${2:-$filepath}"
+
+    if [ ! -f "$filepath" ]; then
+        add_error "File not found: $friendly_name ($filepath)"
+        return 1
+    fi
+    return 0
+}
+
+validate_directory() {
+    local dirpath="$1"
+    local friendly_name="${2:-$dirpath}"
+
+    if [ ! -d "$dirpath" ]; then
+        add_error "Directory not found: $friendly_name ($dirpath)"
+        return 1
+    fi
+    return 0
+}
+
+verify_java_installation() {
+    print_step "Verifying Java installation..."
+
+    if ! validate_executable "java" "Java executable"; then
+        return 1
+    fi
+
+    if ! validate_executable "javac" "Java compiler"; then
+        add_error "Java compiler not found, installation may be incomplete"
+        return 1
+    fi
+
+    print_success "Java installation verified"
+    return 0
+}
+
+verify_sdk_installation() {
+    print_step "Verifying Android SDK installation..."
+
+    local sdk_root="$HOME/Android/sdk"
+
+    validate_directory "$sdk_root" "Android SDK" || return 1
+    validate_directory "$sdk_root/platforms" "SDK platforms" || return 1
+    validate_directory "$sdk_root/build-tools" "Build tools" || return 1
+    validate_directory "$sdk_root/ndk" "NDK" || return 1
+    validate_executable "adb" "ADB tool" || return 1
+
+    print_success "Android SDK installation verified"
+    return 0
+}
+
 show_help() {
     head -n 40 "$0" | tail -n +2 | sed 's/^# //'
 }
@@ -130,14 +258,15 @@ check_disk_space() {
     local required_gb=50
     local available_gb
 
-    if [[ "$OS" == "macos" ]]; then
-        available_gb=$(($(df "$SCRIPT_DIR" | awk 'NR==2 {print $4}') / 1024 / 1024))
-    else
-        available_gb=$(($(df "$SCRIPT_DIR" | awk 'NR==2 {print $4}') / 1024 / 1024))
+    if ! available_gb=$(($(df "$SCRIPT_DIR" 2>/dev/null | awk 'NR==2 {print $4}') / 1024 / 1024)); then
+        add_error "Failed to check disk space"
+        return 1
     fi
 
     if [ "$available_gb" -lt "$required_gb" ]; then
         print_warning "Low disk space: ${available_gb}GB available (${required_gb}GB recommended)"
+        print_warning "Build may fail due to insufficient space"
+        print_warning "Please free up at least $((required_gb - available_gb))GB more"
         return 1
     fi
     print_success "Disk space check: ${available_gb}GB available"
@@ -157,15 +286,31 @@ check_command() {
 install_java_macos() {
     print_step "Installing Java 17 via Homebrew..."
 
-    if ! command -v brew &> /dev/null; then
-        print_error "Homebrew is required for macOS. Install from https://brew.sh"
+    if ! validate_executable "brew" "Homebrew"; then
+        add_error "Homebrew is required for macOS. Install from https://brew.sh"
         return 1
     fi
 
-    brew install openjdk@17 || true
+    if ! brew install openjdk@17; then
+        add_error "Failed to install openjdk@17 via Homebrew"
+        return 1
+    fi
+
+    local brew_path
+    if ! brew_path=$(brew --prefix openjdk@17 2>/dev/null); then
+        add_error "Failed to determine Homebrew openjdk@17 installation path"
+        return 1
+    fi
 
     # Link java
-    sudo ln -sfn "$(brew --prefix openjdk@17)/libexec/openjdk.jdk/Contents/Home" /Library/Java/JavaVirtualMachines/openjdk-17.jdk
+    if ! sudo ln -sfn "$brew_path/libexec/openjdk.jdk/Contents/Home" /Library/Java/JavaVirtualMachines/openjdk-17.jdk; then
+        add_error "Failed to create Java symlink"
+        return 1
+    fi
+
+    if ! verify_java_installation; then
+        return 1
+    fi
 
     print_success "Java 17 installed"
 }
@@ -177,21 +322,38 @@ install_java_linux() {
 
     case "$distro" in
         ubuntu|debian)
-            sudo apt-get update
-            sudo apt-get install -y openjdk-17-jdk openjdk-17-source
+            if ! sudo apt-get update; then
+                add_error "Failed to update package lists"
+                return 1
+            fi
+            if ! sudo apt-get install -y openjdk-17-jdk openjdk-17-source; then
+                add_error "Failed to install Java 17 via apt-get"
+                return 1
+            fi
             ;;
         fedora|rhel|centos)
-            sudo dnf install -y java-17-openjdk java-17-openjdk-devel
+            if ! sudo dnf install -y java-17-openjdk java-17-openjdk-devel; then
+                add_error "Failed to install Java 17 via dnf"
+                return 1
+            fi
             ;;
         arch)
-            sudo pacman -S jdk17-openjdk
+            if ! sudo pacman -S --noconfirm jdk17-openjdk; then
+                add_error "Failed to install Java 17 via pacman"
+                return 1
+            fi
             ;;
         *)
-            print_error "Unsupported Linux distribution: $distro"
+            add_error "Unsupported Linux distribution: $distro"
             print_info "Please install OpenJDK 17 manually and run this script again"
+            print_info "See: https://adoptium.net/ or https://openjdk.org/"
             return 1
             ;;
     esac
+
+    if ! verify_java_installation; then
+        return 1
+    fi
 
     print_success "Java 17 installed"
 }
@@ -211,68 +373,121 @@ setup_android_sdk() {
     local cmdline_tools="$sdk_root/cmdline-tools"
 
     # Create directories
-    mkdir -p "$sdk_root"
-    mkdir -p "$cmdline_tools"
+    if ! mkdir -p "$sdk_root"; then
+        add_error "Failed to create SDK root directory: $sdk_root"
+        return 1
+    fi
+    if ! mkdir -p "$cmdline_tools"; then
+        add_error "Failed to create cmdline-tools directory: $cmdline_tools"
+        return 1
+    fi
 
     print_info "SDK root: $sdk_root"
 
     # Download and setup cmdline-tools
     local download_url
     case "$OS:$ARCH" in
-        linux:x86_64)
+        linux:x86_64|linux:aarch64)
             download_url="https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip"
             ;;
-        linux:aarch64)
-            download_url="https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip"
-            ;;
-        macos:x86_64)
-            download_url="https://dl.google.com/android/repository/commandlinetools-mac-9477386_latest.zip"
-            ;;
-        macos:arm64)
+        macos:x86_64|macos:arm64)
             download_url="https://dl.google.com/android/repository/commandlinetools-mac-9477386_latest.zip"
             ;;
         *)
-            print_error "Unsupported platform: $OS:$ARCH"
+            add_error "Unsupported platform: $OS:$ARCH"
             return 1
             ;;
     esac
 
-    print_info "Downloading Android SDK command-line tools..."
+    print_info "Downloading Android SDK command-line tools from Google..."
+    print_info "This may take 5-15 minutes depending on connection speed"
+
     local tmpfile
-    tmpfile=$(mktemp)
-    curl -L "$download_url" -o "$tmpfile" --progress-bar
+    tmpfile=$(mktemp) || { add_error "Failed to create temporary file"; return 1; }
 
-    print_info "Extracting..."
-    unzip -q "$tmpfile" -d "$cmdline_tools"
-    rm "$tmpfile"
+    if ! download_with_retry "$download_url" "$tmpfile"; then
+        add_error "Failed to download Android SDK command-line tools"
+        rm -f "$tmpfile"
+        return 1
+    fi
 
+    print_info "Extracting Android SDK command-line tools..."
+    if ! unzip -q "$tmpfile" -d "$cmdline_tools"; then
+        add_error "Failed to extract SDK tools zip file"
+        rm -f "$tmpfile"
+        return 1
+    fi
+
+    # Move the extracted cmdline-tools to the correct location
+    if [ -d "$cmdline_tools/cmdline-tools/latest" ]; then
+        print_info "Cmdline-tools already in correct location"
+    elif [ -d "$cmdline_tools/cmdline-tools" ]; then
+        if ! mv "$cmdline_tools/cmdline-tools" "$cmdline_tools/latest"; then
+            add_error "Failed to move cmdline-tools to latest directory"
+            rm -f "$tmpfile"
+            return 1
+        fi
+    else
+        add_error "Unexpected SDK structure after extraction"
+        rm -f "$tmpfile"
+        return 1
+    fi
+
+    rm -f "$tmpfile"
     print_success "Android SDK command-line tools installed"
 }
 
 install_sdk_packages() {
     print_step "Installing Android SDK platforms and tools..."
+    print_info "This may take 20-40 minutes (large downloads)"
 
     local sdk_root="$HOME/Android/sdk"
     local sdkmanager="$sdk_root/cmdline-tools/latest/bin/sdkmanager"
 
+    if ! validate_file "$sdkmanager" "SDK Manager"; then
+        add_error "SDK Manager not found, SDK setup may have failed"
+        return 1
+    fi
+
     # Accept all licenses
-    yes | "$sdkmanager" --licenses || true
+    print_info "Accepting Android SDK licenses..."
+    if ! yes | "$sdkmanager" --licenses 2>/dev/null; then
+        print_warning "License acceptance may have failed, continuing..."
+    fi
 
-    # Install required packages
-    print_info "Installing platforms..."
-    "$sdkmanager" "platforms;android-$ANDROID_SDK_VERSION"
+    # Install required packages with retry
+    print_info "Installing Android SDK API 35..."
+    if ! retry_with_backoff "$sdkmanager" "platforms;android-$ANDROID_SDK_VERSION"; then
+        add_error "Failed to install Android SDK platforms"
+        return 1
+    fi
 
-    print_info "Installing build tools..."
-    "$sdkmanager" "build-tools;$ANDROID_BUILD_TOOLS"
+    print_info "Installing Build Tools $ANDROID_BUILD_TOOLS..."
+    if ! retry_with_backoff "$sdkmanager" "build-tools;$ANDROID_BUILD_TOOLS"; then
+        add_error "Failed to install Build Tools"
+        return 1
+    fi
 
-    print_info "Installing NDK..."
-    "$sdkmanager" "ndk;$ANDROID_NDK_VERSION"
+    print_info "Installing NDK $ANDROID_NDK_VERSION..."
+    if ! retry_with_backoff "$sdkmanager" "ndk;$ANDROID_NDK_VERSION"; then
+        add_error "Failed to install NDK"
+        return 1
+    fi
 
     print_info "Installing platform tools..."
-    "$sdkmanager" "platform-tools"
+    if ! retry_with_backoff "$sdkmanager" "platform-tools"; then
+        add_error "Failed to install platform tools"
+        return 1
+    fi
 
-    print_info "Installing system images..."
-    "$sdkmanager" "system-images;android-$ANDROID_SDK_VERSION;google_apis;x86_64" || true
+    print_info "Installing system images (optional)..."
+    if ! "$sdkmanager" "system-images;android-$ANDROID_SDK_VERSION;google_apis;x86_64" 2>/dev/null; then
+        print_warning "System images installation failed (non-critical), continuing..."
+    fi
+
+    if ! verify_sdk_installation; then
+        return 1
+    fi
 
     print_success "SDK packages installed"
 }
@@ -338,40 +553,133 @@ check_gradle() {
 
     if [ -f "$SCRIPT_DIR/gradlew" ]; then
         print_success "Gradle wrapper found"
+        chmod +x "$SCRIPT_DIR/gradlew" 2>/dev/null || true
         return 0
     else
-        print_error "Gradle wrapper not found at $SCRIPT_DIR/gradlew"
+        add_error "Gradle wrapper not found at $SCRIPT_DIR/gradlew"
         return 1
     fi
+}
+
+run_preflight_checks() {
+    print_header "Pre-flight Checks"
+
+    local checks_passed=0
+    local checks_total=0
+
+    # Check disk space
+    checks_total=$((checks_total + 1))
+    if check_disk_space; then
+        checks_passed=$((checks_passed + 1))
+    else
+        print_warning "Disk space check failed"
+    fi
+
+    # Check curl
+    checks_total=$((checks_total + 1))
+    if validate_executable "curl" "curl"; then
+        checks_passed=$((checks_passed + 1))
+    fi
+
+    # Check unzip
+    checks_total=$((checks_total + 1))
+    if validate_executable "unzip" "unzip"; then
+        checks_passed=$((checks_passed + 1))
+    fi
+
+    # Check git
+    checks_total=$((checks_total + 1))
+    if validate_executable "git" "git"; then
+        checks_passed=$((checks_passed + 1))
+    fi
+
+    # Check sudo
+    checks_total=$((checks_total + 1))
+    if [ "$OS" != "windows" ]; then
+        if validate_executable "sudo" "sudo"; then
+            checks_passed=$((checks_passed + 1))
+        fi
+    else
+        checks_passed=$((checks_passed + 1))
+    fi
+
+    print_info "Pre-flight checks: $checks_passed/$checks_total passed"
+
+    if [ $checks_passed -lt $((checks_total - 1)) ]; then
+        print_error "Critical tools missing"
+        return 1
+    fi
+
+    return 0
 }
 
 build_project() {
     print_header "Building SWORDCOMM ($BUILD_VARIANT)"
 
-    cd "$SCRIPT_DIR"
+    cd "$SCRIPT_DIR" || { add_error "Failed to change to project directory"; return 1; }
 
-    print_step "Running Gradle build..."
+    if ! validate_file "$SCRIPT_DIR/gradlew" "Gradle wrapper"; then
+        return 1
+    fi
+
+    if ! validate_directory "$SCRIPT_DIR/app" "App directory"; then
+        return 1
+    fi
+
+    print_info "Build variant: $BUILD_VARIANT"
+    print_info "This is a full build and may take 10-30 minutes on first run"
+    print_info "Logs: watch with 'tail -f $LOG_FILE'"
 
     local gradle_flags="-PCI=true"
     if [ "$CI_MODE" = true ]; then
         gradle_flags="$gradle_flags -x lint"
     fi
 
-    if ! ./gradlew $gradle_flags ":app:assemble$BUILD_VARIANT"; then
-        print_error "Build failed"
+    # Run the build with detailed error handling
+    if ! ./gradlew $gradle_flags ":app:assemble$BUILD_VARIANT" 2>&1 | tee -a "$LOG_FILE"; then
+        add_error "Gradle build failed for variant: $BUILD_VARIANT"
+        print_error "Check the logs above for detailed error information"
         return 1
     fi
 
     print_success "Build completed successfully!"
 
-    # Find the output APK
-    local apk_path="$SCRIPT_DIR/app/build/outputs/apk/*/release/app-*-release.apk"
-    local apk_path_debug="$SCRIPT_DIR/app/build/outputs/apk/*/debug/app-*-debug.apk"
+    # Find and verify the output APK
+    local apk_found=false
+    local apk_file=""
 
-    if compgen -G "$apk_path" > /dev/null 2>&1; then
-        print_success "APK generated: $(ls -lh $apk_path | awk '{print $9, "(" $5 ")"}')"
-    elif compgen -G "$apk_path_debug" > /dev/null 2>&1; then
-        print_success "APK generated: $(ls -lh $apk_path_debug | awk '{print $9, "(" $5 ")"}')"
+    # Try to find release APK
+    for apk in "$SCRIPT_DIR/app/build/outputs/apk"/*"/release/"*.apk; do
+        if [ -f "$apk" ]; then
+            apk_file="$apk"
+            apk_found=true
+            break
+        fi
+    done
+
+    # If no release APK, try debug
+    if [ "$apk_found" = false ]; then
+        for apk in "$SCRIPT_DIR/app/build/outputs/apk"/*"/debug/"*.apk; do
+            if [ -f "$apk" ]; then
+                apk_file="$apk"
+                apk_found=true
+                break
+            fi
+        done
+    fi
+
+    if [ "$apk_found" = true ]; then
+        local apk_size
+        apk_size=$(ls -lh "$apk_file" | awk '{print $5}')
+        print_success "APK generated: $apk_file"
+        print_info "APK size: $apk_size"
+        echo ""
+        print_info "Next steps:"
+        echo "  1. Install on device: adb install \"$apk_file\""
+        echo "  2. Or push to device for sideloading"
+    else
+        add_error "APK file not found after successful build"
+        return 1
     fi
 }
 
@@ -411,8 +719,19 @@ show_summary() {
 ################################################################################
 
 main() {
+    # Initialize log file
+    {
+        echo "================================================================================"
+        echo "SWORDCOMM Android Build Bootstrap - $(date)"
+        echo "OS: $OS ($ARCH)"
+        echo "================================================================================"
+    } > "$LOG_FILE"
+
+    log_message "INFO" "Starting SWORDCOMM Android Build Bootstrap"
+
     print_header "SWORDCOMM Android Build Bootstrap"
     print_info "Bootstrapping Android development environment..."
+    print_info "Log file: $LOG_FILE"
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -453,8 +772,13 @@ main() {
         esac
     done
 
-    # Initial checks
-    check_disk_space || print_warning "Insufficient disk space - continue with caution"
+    log_message "INFO" "Options: INSTALL_JAVA=$INSTALL_JAVA INSTALL_SDK=$INSTALL_SDK AUTO_BUILD=$AUTO_BUILD VARIANT=$BUILD_VARIANT"
+
+    # Run pre-flight checks
+    if ! run_preflight_checks; then
+        add_error "Pre-flight checks failed"
+        cleanup_on_error
+    fi
 
     print_info "Detected OS: $OS ($ARCH)"
 
@@ -467,23 +791,28 @@ main() {
         else
             case "$OS" in
                 linux)
-                    install_java_linux || { print_error "Java installation failed"; exit 1; }
+                    log_message "INFO" "Installing Java 17 on Linux"
+                    install_java_linux || cleanup_on_error
                     ;;
                 macos)
-                    install_java_macos || { print_error "Java installation failed"; exit 1; }
+                    log_message "INFO" "Installing Java 17 on macOS"
+                    install_java_macos || cleanup_on_error
                     ;;
                 windows)
-                    install_java_windows || { print_error "Java installation failed"; exit 1; }
+                    log_message "INFO" "Windows detected, Java installation required via installer"
+                    install_java_windows || cleanup_on_error
                     ;;
                 *)
-                    print_error "Unsupported OS: $OS"
-                    exit 1
+                    add_error "Unsupported OS: $OS"
+                    cleanup_on_error
                     ;;
             esac
         fi
 
         # Verify java installation
-        check_java_version || exit 1
+        if ! check_java_version; then
+            cleanup_on_error
+        fi
     fi
 
     # Android SDK installation
@@ -491,25 +820,35 @@ main() {
         print_header "Android SDK Installation"
 
         if [ ! -d "$HOME/Android/sdk" ]; then
-            setup_android_sdk || { print_error "SDK setup failed"; exit 1; }
-            install_sdk_packages || { print_error "SDK package installation failed"; exit 1; }
+            log_message "INFO" "Installing Android SDK"
+            setup_android_sdk || cleanup_on_error
+            install_sdk_packages || cleanup_on_error
         else
             print_info "Android SDK already installed at $HOME/Android/sdk"
+            log_message "INFO" "SDK already present, verifying installation"
+            verify_sdk_installation || cleanup_on_error
         fi
 
         setup_environment
+        log_message "INFO" "Environment variables configured"
     fi
 
     # Gradle check
-    check_gradle || exit 1
+    if ! check_gradle; then
+        cleanup_on_error
+    fi
 
     # Build project if requested
     if [ "$AUTO_BUILD" = true ] && [ "$RUN_BUILD" = true ]; then
-        build_project || exit 1
+        log_message "INFO" "Starting Gradle build for variant: $BUILD_VARIANT"
+        build_project || cleanup_on_error
     fi
 
     # Show summary
     show_summary
+
+    log_message "INFO" "Bootstrap script completed successfully"
+    print_success "All tasks completed!"
 }
 
 # Run main function
