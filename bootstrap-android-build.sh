@@ -382,10 +382,6 @@ setup_android_sdk() {
         add_error "Failed to create SDK root directory: $sdk_root"
         return 1
     fi
-    if ! mkdir -p "$cmdline_tools"; then
-        add_error "Failed to create cmdline-tools directory: $cmdline_tools"
-        return 1
-    fi
 
     print_info "SDK root: $sdk_root"
 
@@ -416,30 +412,49 @@ setup_android_sdk() {
         return 1
     fi
 
+    # Create temp extraction directory
+    local tmpextract
+    tmpextract=$(mktemp -d) || { add_error "Failed to create temp directory"; return 1; }
+
     print_info "Extracting Android SDK command-line tools..."
-    if ! unzip -q "$tmpfile" -d "$cmdline_tools"; then
+    if ! unzip -q "$tmpfile" -d "$tmpextract"; then
         add_error "Failed to extract SDK tools zip file"
-        rm -f "$tmpfile"
+        rm -f "$tmpfile" "$tmpextract"
         return 1
     fi
 
-    # Move the extracted cmdline-tools to the correct location
-    if [ -d "$cmdline_tools/cmdline-tools/latest" ]; then
-        print_info "Cmdline-tools already in correct location"
-    elif [ -d "$cmdline_tools/cmdline-tools" ]; then
-        if ! mv "$cmdline_tools/cmdline-tools" "$cmdline_tools/latest"; then
-            add_error "Failed to move cmdline-tools to latest directory"
-            rm -f "$tmpfile"
-            return 1
-        fi
-    else
-        add_error "Unexpected SDK structure after extraction"
-        rm -f "$tmpfile"
+    # The zip contains a top-level 'cmdline-tools' directory
+    # We need to move it to the right location: $sdk_root/cmdline-tools/latest
+    if [ ! -d "$tmpextract/cmdline-tools" ]; then
+        add_error "Unexpected SDK structure: cmdline-tools directory not found in extraction"
+        rm -rf "$tmpextract" "$tmpfile"
         return 1
     fi
 
-    rm -f "$tmpfile"
+    # Remove old cmdline-tools if it exists
+    if [ -d "$cmdline_tools" ]; then
+        print_info "Removing old cmdline-tools directory..."
+        rm -rf "$cmdline_tools"
+    fi
+
+    # Create the cmdline-tools directory and move the extracted one to 'latest'
+    mkdir -p "$cmdline_tools"
+    if ! mv "$tmpextract/cmdline-tools" "$cmdline_tools/latest"; then
+        add_error "Failed to move cmdline-tools to sdk location"
+        rm -rf "$tmpextract" "$tmpfile"
+        return 1
+    fi
+
+    # Verify the extraction worked
+    if [ ! -f "$cmdline_tools/latest/bin/sdkmanager" ]; then
+        add_error "SDK Manager not found at expected location: $cmdline_tools/latest/bin/sdkmanager"
+        rm -rf "$tmpextract" "$tmpfile"
+        return 1
+    fi
+
+    rm -rf "$tmpextract" "$tmpfile"
     print_success "Android SDK command-line tools installed"
+    return 0
 }
 
 install_sdk_packages() {
