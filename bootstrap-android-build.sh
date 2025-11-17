@@ -554,8 +554,15 @@ check_java_version() {
         return 1
     fi
 
+    # Use POSIX-compatible parsing (grep -P is GNU only, not available on macOS)
     local java_version
-    java_version=$(java -version 2>&1 | grep -oP 'version "\K[\d.]+' | head -1)
+    java_version=$(java -version 2>&1 | sed -n 's/.*version "\([^"]*\).*/\1/p' | head -1)
+
+    if [ -z "$java_version" ]; then
+        print_error "Could not determine Java version"
+        return 1
+    fi
+
     local major_version
     major_version=$(echo "$java_version" | cut -d. -f1)
 
