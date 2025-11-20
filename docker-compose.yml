@@ -12,6 +12,8 @@ services:
         BUILD_TOOLS_VERSION: 35.0.0
         COMPILE_SDK_VERSION: android-35
     volumes:
+      - .:/molly
+      - ./.git:/molly/.git
       - ./app/build/outputs:/molly/app/build/outputs
       - gradle-cache:/root/.gradle
     environment:

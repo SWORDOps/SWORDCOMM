@@ -87,8 +87,9 @@ android {
   }
 
   signingConfigs {
-    System.getenv("CI_KEYSTORE_PATH")?.let { path ->
+    if (!System.getenv("CI_KEYSTORE_PATH").isNullOrBlank()) {
       create("ci") {
+        val path = System.getenv("CI_KEYSTORE_PATH")
         println("Signing release build with keystore: '$path'")
         storeFile = file(path)
         storePassword = System.getenv("CI_KEYSTORE_PASSWORD")
@@ -268,7 +269,9 @@ android {
     getByName("release") {
       isMinifyEnabled = true
       isShrinkResources = true
-      signingConfig = signingConfigs.findByName("ci")
+      if (project.hasProperty("keystorePath") && (project.property("keystorePath") as? String)?.isNotBlank() == true) {
+        signingConfig = signingConfigs.findByName("ci")
+      }
       proguardFiles(*buildTypes["debug"].proguardFiles.toTypedArray())
     }
 
@@ -624,11 +627,16 @@ fun getGitHash(): String {
 fun getCommitTag(): String {
   assertIsGitRepo()
 
-  val tag = providers.exec {
-    commandLine("git", "describe", "--tags", "--exact-match")
-  }.standardOutput.asText.get().trim()
+  try {
+    val tag = providers.exec {
+      commandLine("git", "describe", "--tags", "--exact-match")
+    }.standardOutput.asText.get().trim()
 
-  return tag.takeIf { it.isNotEmpty() } ?: "untagged"
+    return tag.takeIf { it.isNotEmpty() } ?: "untagged"
+  } catch (e: Exception) {
+    logger.warn("Failed to get Git commit tag: ${e.message}")
+    return "untagged"
+  }
 }
 
 fun getCurrentGitTag(): String? {

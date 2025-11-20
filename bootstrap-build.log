@@ -1,0 +1,7 @@
+================================================================================
+SWORDCOMM Android Build Bootstrap - Mon Nov 17 22:06:06 GMT 2025
+OS: linux (x86_64)
+================================================================================
+[2025-11-17 22:06:06] [INFO] Starting SWORDCOMM Android Build Bootstrap
+[2025-11-17 22:06:06] [INFO] Options: INSTALL_JAVA=true INSTALL_SDK=true AUTO_BUILD=false VARIANT=prodGmsWebsiteDebug
+[2025-11-17 22:06:06] [INFO] Installing Java 17 on Linux
