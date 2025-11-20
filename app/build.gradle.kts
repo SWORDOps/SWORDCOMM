@@ -642,14 +642,19 @@ fun getCommitTag(): String {
 fun getCurrentGitTag(): String? {
   assertIsGitRepo()
 
-  val output = providers.exec {
-    commandLine("git", "tag", "--points-at", "HEAD")
-  }.standardOutput.asText.get().trim()
+  return try {
+    val output = providers.exec {
+      commandLine("git", "tag", "--points-at", "HEAD")
+    }.standardOutput.asText.get().trim()
 
-  return if (output.isNotEmpty()) {
-    val tags = output.split("\n").toList()
-    tags.firstOrNull { it.contains("nightly") } ?: tags[0]
-  } else {
+    if (output.isNotEmpty()) {
+      val tags = output.split("\n").toList()
+      tags.firstOrNull { it.contains("nightly") } ?: tags[0]
+    } else {
+      null
+    }
+  } catch (e: Exception) {
+    logger.warn("Failed to get current Git tag: ${e.message}")
     null
   }
 }
