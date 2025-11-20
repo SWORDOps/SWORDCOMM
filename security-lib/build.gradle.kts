@@ -30,16 +30,17 @@ android {
                 )
 
                 // CMake arguments
-                arguments += listOf(
-                    "-DANDROID_STL=c++_shared",
-                    "-DANDROID_ARM_NEON=TRUE",
-                    "-DPRODUCTION_CRYPTO=ON",
-                    "-DOQS_USE_OPENSSL=ON",
-                    "-DOQS_MINIMAL_BUILD=ON",
-                    "-DOQS_ENABLE_KEM_ml_kem_1024=ON",
-                    "-DOQS_ENABLE_SIG_ml_dsa_87=ON",
-                    "-DOQS_SPEED_USE_ARM_NEON=ON"
-                )
+        arguments(
+            "-DANDROID_STL=c++_shared",
+            "-DANDROID_ARM_NEON=TRUE",
+            "-DPRODUCTION_CRYPTO=${findProperty("PRODUCTION_CRYPTO") ?: "OFF"}",
+            "-DOQS_USE_OPENSSL=ON",
+            "-DOQS_MINIMAL_BUILD=ON",
+            "-DOQS_ENABLE_KEM_ml_kem_1024=ON",
+            "-DOQS_ENABLE_SIG_ml_dsa_87=ON",
+            "-DOQS_SPEED_USE_ARM_NEON=ON",
+            "-DCMAKE_MODULE_PATH=${project.projectDir}/cmake"
+        )
             }
         }
 

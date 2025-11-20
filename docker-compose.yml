@@ -35,7 +35,7 @@ services:
       - CI_KEYSTORE_ALIAS=${CI_KEYSTORE_ALIAS}
     # Note: Dockerfile has ENTRYPOINT ["./gradlew", "-PCI=true"]
     # So this command becomes: ./gradlew -PCI=true assembleDebug
-    command: ["assembleDebug"]
+    command: ["--info", "assembleDebug"]
 
   # Python translation server builder
   python-server:
