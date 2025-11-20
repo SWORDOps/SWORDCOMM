@@ -19,8 +19,8 @@ https://docs.gradle.org/current/userguide/dependency_verification.html
       <trusted-artifacts>
          <trust file=".*-javadoc[.]jar" regex="true"/>
          <trust file=".*-sources[.]jar" regex="true"/>
-         <trust file=".*[.]pom" regex="true"/>
          <trust file=".*[.]module" regex="true"/>
+         <trust file=".*[.]pom" regex="true"/>
       </trusted-artifacts>
       <ignored-keys>
          <ignored-key id="018F12E294A44C34" reason="Key couldn't be downloaded from any key server"/>

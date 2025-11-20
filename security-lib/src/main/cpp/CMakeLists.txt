@@ -12,7 +12,9 @@ if(PRODUCTION_CRYPTO)
 
     # Include liboqs fetch and build configuration
     set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake ${CMAKE_MODULE_PATH})
-    include(FetchLibOQS)
+    set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake)
+set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake)
+include(FetchLibOQS)
 
     # Add production crypto compile definition
     add_compile_definitions(PRODUCTION_CRYPTO)
