@@ -1,0 +1,100 @@
+name: Build Android APK
+
+on:
+  push:
+    branches:
+      - 'claude/fix-android-build-*'
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: 'gradle'
+
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+
+    - name: Install Android SDK components
+      run: |
+        yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+        $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+          "platforms;android-34" \
+          "platforms;android-35" \
+          "build-tools;35.0.0" \
+          "ndk;27.0.12077973"
+
+    - name: Create local.properties
+      run: echo "sdk.dir=$ANDROID_HOME" > local.properties
+
+    - name: Grant execute permission for scripts
+      run: chmod +x gradlew fetch_and_build.sh
+
+    - name: Build with Gradle (automated)
+      run: ./fetch_and_build.sh
+      env:
+        JAVA_HOME: ${{ env.JAVA_HOME_17_X64 }}
+
+    - name: List build outputs
+      if: always()
+      run: |
+        echo "Build outputs:"
+        find app/build/outputs/apk -name "*.apk" 2>/dev/null || echo "No APKs found"
+
+    - name: Upload Debug APK
+      if: success()
+      uses: actions/upload-artifact@v4
+      with:
+        name: swordcomm-debug-apk
+        path: |
+          app/build/outputs/apk/**/*.apk
+          !app/build/outputs/apk/**/*-unaligned.apk
+        retention-days: 7
+        if-no-files-found: error
+
+    - name: Upload build logs
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-logs
+        path: |
+          /tmp/build*.log
+          /tmp/fetch_and_build.log
+        retention-days: 3
+        if-no-files-found: ignore
+
+    - name: Display build summary
+      if: always()
+      run: |
+        if [ -f "/tmp/fetch_and_build.log" ]; then
+          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if grep -q "BUILD SUCCESSFUL" /tmp/fetch_and_build.log; then
+            echo "✅ Build completed successfully!" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### APK Locations:" >> $GITHUB_STEP_SUMMARY
+            find app/build/outputs/apk -name "*.apk" 2>/dev/null | while read apk; do
+              size=$(du -h "$apk" | cut -f1)
+              echo "- \`$apk\` ($size)" >> $GITHUB_STEP_SUMMARY
+            done || echo "No APKs found" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Build failed" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Error Summary:" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            tail -50 /tmp/fetch_and_build.log >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          fi
+        fi
