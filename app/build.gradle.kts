@@ -73,7 +73,7 @@ android {
 
   buildToolsVersion = signalBuildToolsVersion
   compileSdkVersion = signalCompileSdkVersion
-  // ndkVersion = signalNdkVersion
+  ndkVersion = signalNdkVersion
 
   flavorDimensions += listOf("environment", "license", "distribution")
   testBuildType = "instrumentation"

@@ -51,12 +51,10 @@ add_library(molly_security SHARED
 
 find_library(log-lib log)
 find_library(android-lib android)
-find_library(crypto-lib crypto)
 
 target_link_libraries(molly_security
     ${log-lib}
     ${android-lib}
-    ${crypto-lib}
 )
 
 if(PRODUCTION_CRYPTO)
