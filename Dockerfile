@@ -21,8 +21,9 @@ RUN mkdir /root/.android && touch /root/.android/repositories.cfg
 RUN yes | sdkmanager --licenses
 
 ARG BUILD_TOOLS_VERSION=35.0.0
+ARG NDK_VERSION=28.0.13004108
 
-RUN sdkmanager "ndk-bundle"
+RUN sdkmanager "ndk;${NDK_VERSION}"
 RUN sdkmanager "platforms;android-35"
 RUN sdkmanager "build-tools;${BUILD_TOOLS_VERSION}"
 

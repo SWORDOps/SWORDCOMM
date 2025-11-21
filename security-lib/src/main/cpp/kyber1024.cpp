@@ -47,8 +47,8 @@ Kyber1024::KeyPair Kyber1024::generate_keypair() {
     secure_random_bytes(keypair.secret_key.data(), KYBER1024_SECRET_KEY_BYTES);
 
     // Add magic bytes to identify as Kyber-1024
-    keypair.public_key[0] = 0xKY; // Marker
-    keypair.public_key[1] = 0xBE;
+    keypair.public_key[0] = 0x4B; // Marker 'K'
+    keypair.public_key[1] = 0x59; // 'Y'
     keypair.public_key[2] = 0x10; // Version 1.0
     keypair.public_key[3] = 0x24; // Kyber-1024
 
@@ -80,7 +80,7 @@ Kyber1024::EncapsulationResult Kyber1024::encapsulate(const std::vector<uint8_t>
     secure_random_bytes(result.ciphertext.data(), KYBER1024_CIPHERTEXT_BYTES);
 
     // Add marker to ciphertext
-    result.ciphertext[0] = 0xCT; // Ciphertext marker
+    result.ciphertext[0] = 0x43; // Ciphertext marker 'C'
     result.ciphertext[1] = 0x10;
     result.ciphertext[2] = 0x24;
 
