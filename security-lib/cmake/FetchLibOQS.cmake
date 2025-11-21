@@ -45,6 +45,8 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -ffast-math -march=armv8-a+crypto")
 
 FetchContent_MakeAvailable(liboqs)
 
+set(crypto-lib oqs PARENT_SCOPE)
+
 message(STATUS "liboqs configuration complete")
 message(STATUS "  - ML-KEM-1024: ENABLED")
 message(STATUS "  - ML-DSA-87: ENABLED")

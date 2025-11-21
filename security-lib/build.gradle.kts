@@ -6,7 +6,8 @@ plugins {
 android {
     namespace = "im.molly.security"
     compileSdk = 34
-    ndkVersion = "26.1.10909125"
+ndkPath = "/opt/android-sdk-linux/ndk/27.0.12077973"
+    // ndkVersion = "26.1.10909125"
 
     defaultConfig {
         minSdk = 29

@@ -20,14 +20,10 @@ ENV PATH="${PATH}:${ANDROID_HOME}/cmdline-tools/latest/bin"
 RUN mkdir /root/.android && touch /root/.android/repositories.cfg
 RUN yes | sdkmanager --licenses
 
-RUN sdkmanager "platform-tools"
-
-ARG NDK_VERSION=28.0.13004108
 ARG BUILD_TOOLS_VERSION=35.0.0
-ARG COMPILE_SDK_VERSION=android-35
 
-RUN sdkmanager "ndk;${NDK_VERSION}"
-RUN sdkmanager "platforms;${COMPILE_SDK_VERSION}"
+RUN sdkmanager "ndk-bundle"
+RUN sdkmanager "platforms;android-35"
 RUN sdkmanager "build-tools;${BUILD_TOOLS_VERSION}"
 
 COPY gradlew /molly/

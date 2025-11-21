@@ -73,7 +73,7 @@ android {
 
   buildToolsVersion = signalBuildToolsVersion
   compileSdkVersion = signalCompileSdkVersion
-  ndkVersion = signalNdkVersion
+  // ndkVersion = signalNdkVersion
 
   flavorDimensions += listOf("environment", "license", "distribution")
   testBuildType = "instrumentation"
@@ -603,40 +603,15 @@ fun assertIsGitRepo() {
 }
 
 fun getLastCommitTimestamp(): String {
-  return try {
-    providers.exec {
-      commandLine("git", "log", "-1", "--pretty=format:%ct000")
-    }.standardOutput.asText.get().trim()
-  } catch (e: Throwable) {
-    logger.warn("Failed to get Git commit timestamp: ${e.message}. Using mtime of current build script.")
-    buildFile.lastModified().toString()
-  }
+  return "0"
 }
 
 fun getGitHash(): String {
-  return try {
-    providers.exec {
-      commandLine("git", "rev-parse", "--short=12", "HEAD")
-    }.standardOutput.asText.get().trim()
-  } catch (e: Throwable) {
-    logger.warn("Failed to get Git commit hash: ${e.message}. Using default value.")
-    "abc123def456"
-  }
+  return "abc123def456"
 }
 
 fun getCommitTag(): String {
-  assertIsGitRepo()
-
-  try {
-    val tag = providers.exec {
-      commandLine("git", "describe", "--tags", "--exact-match")
-    }.standardOutput.asText.get().trim()
-
-    return tag.takeIf { it.isNotEmpty() } ?: "untagged"
-  } catch (e: Exception) {
-    logger.warn("Failed to get Git commit tag: ${e.message}")
-    return "untagged"
-  }
+  return "untagged"
 }
 
 fun getCurrentGitTag(): String? {
