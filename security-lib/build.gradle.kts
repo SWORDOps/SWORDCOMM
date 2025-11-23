@@ -33,7 +33,7 @@ android {
         arguments(
             "-DANDROID_STL=c++_shared",
             "-DANDROID_ARM_NEON=TRUE",
-            "-DPRODUCTION_CRYPTO=${findProperty("PRODUCTION_CRYPTO") ?: "OFF"}",
+            "-DPRODUCTION_CRYPTO=${findProperty("PRODUCTION_CRYPTO") ?: "ON"}",
             "-DOQS_USE_OPENSSL=ON",
             "-DOQS_MINIMAL_BUILD=ON",
             "-DOQS_ENABLE_KEM_ml_kem_1024=ON",
