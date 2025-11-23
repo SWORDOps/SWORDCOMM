@@ -1,8 +1,8 @@
 ================================================================================
-SWORDCOMM Android Build Bootstrap - Fri Nov 21 11:56:05 UTC 2025
+SWORDCOMM Android Build Bootstrap - Sun Nov 23 20:10:49 UTC 2025
 OS: linux (x86_64)
 ================================================================================
-[2025-11-21 11:56:05] [INFO] Starting SWORDCOMM Android Build Bootstrap
-[2025-11-21 11:56:05] [INFO] Options: INSTALL_JAVA=true INSTALL_SDK=true AUTO_BUILD=false VARIANT=prodGmsWebsiteDebug
-[2025-11-21 11:56:05] [INFO] Installing Java 17 on Linux
-[2025-11-21 11:56:05] [ERROR] Failed to update package lists
+[2025-11-23 20:10:49] [INFO] Starting SWORDCOMM Android Build Bootstrap
+[2025-11-23 20:10:49] [INFO] Options: INSTALL_JAVA=true INSTALL_SDK=false AUTO_BUILD=false VARIANT=prodGmsWebsiteDebug
+[2025-11-23 20:10:49] [INFO] Installing Java 17 on Linux
+[2025-11-23 20:10:49] [ERROR] Failed to update package lists
