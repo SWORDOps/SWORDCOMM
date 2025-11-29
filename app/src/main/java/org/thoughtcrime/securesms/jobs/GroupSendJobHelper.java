@@ -36,12 +36,18 @@ final class GroupSendJobHelper {
 
   private static final String TAG = Log.tag(GroupSendJobHelper.class);
 
-  // Legitimacy thresholds for reducing false positives
-  private static final int TRUSTED_RECIPIENT_MIN_SUCCESS_COUNT = 3;
-  private static final int HIGH_REPUTATION_THRESHOLD = 80; // 80% success rate
-  private static final int SUSPICIOUS_FAILURE_THRESHOLD = 3; // Consecutive failures before marking suspicious
-
   private GroupSendJobHelper() {
+  }
+
+  static {
+    // Log configuration on first use
+    if (RejectionReducerConfig.ENABLE_DETAILED_LOGGING) {
+      Log.i(TAG, "[Claude Rejection Reducer] Configuration: " + RejectionReducerConfig.getConfigSummary());
+      Log.i(TAG, "[Claude Rejection Reducer] Preset: " + RejectionReducerConfig.getPresetName());
+      if (!RejectionReducerConfig.isConfigValid()) {
+        Log.e(TAG, "[Claude Rejection Reducer] WARNING: Configuration validation failed! Using possibly invalid settings.");
+      }
+    }
   }
 
   /**
@@ -281,19 +287,24 @@ final class GroupSendJobHelper {
   private static @NonNull LegitimacyScore assessRecipientLegitimacy(@NonNull Recipient recipient,
                                                                      @NonNull SendMessageResult result,
                                                                      boolean hasFailure) {
-    int reputationScore = 50; // Default neutral score
+    // Return neutral score if legitimacy scoring is disabled
+    if (!RejectionReducerConfig.ENABLE_LEGITIMACY_SCORING) {
+      return new LegitimacyScore(RejectionReducerConfig.NEUTRAL_BASELINE_SCORE, false, false, "DISABLED");
+    }
+
+    int reputationScore = RejectionReducerConfig.NEUTRAL_BASELINE_SCORE;
     boolean isTrusted = false;
     boolean isSuspectedFalsePositive = false;
     String legitimacyLevel = "UNKNOWN";
 
     // Factor 1: Contact relationship indicators
     if (recipient.isSystemContact()) {
-      reputationScore += 25;
+      reputationScore += RejectionReducerConfig.SYSTEM_CONTACT_POINTS;
       legitimacyLevel = "SYSTEM_CONTACT";
     }
 
     if (recipient.isProfileSharing() || recipient.hasAUserSetDisplayName(recipient.getContext())) {
-      reputationScore += 15;
+      reputationScore += RejectionReducerConfig.PROFILE_SHARING_POINTS;
       if (legitimacyLevel.equals("SYSTEM_CONTACT")) {
         legitimacyLevel = "TRUSTED_SYSTEM_CONTACT";
       } else {
@@ -303,28 +314,60 @@ final class GroupSendJobHelper {
 
     // Factor 2: Group membership (shared context)
     if (recipient.isGroup() || recipient.getGroupId().isPresent()) {
-      reputationScore += 10;
+      reputationScore += RejectionReducerConfig.GROUP_MEMBERSHIP_POINTS;
+    }
+
+    // Cap score at maximum
+    if (reputationScore > RejectionReducerConfig.MAX_LEGITIMACY_SCORE) {
+      reputationScore = RejectionReducerConfig.MAX_LEGITIMACY_SCORE;
     }
 
     // Factor 3: Determine if this is a trusted contact (high reputation)
-    if (reputationScore >= HIGH_REPUTATION_THRESHOLD) {
+    if (reputationScore >= RejectionReducerConfig.TRUSTED_THRESHOLD) {
       isTrusted = true;
       legitimacyLevel = "TRUSTED";
     }
 
     // Factor 4: Analyze if failure appears to be a false positive
-    if (hasFailure && isTrusted) {
+    if (!RejectionReducerConfig.ENABLE_FALSE_POSITIVE_DETECTION || !hasFailure) {
+      return new LegitimacyScore(reputationScore, isTrusted, false, legitimacyLevel);
+    }
+
+    // Check for false positive indicators based on config
+    if (isTrusted && RejectionReducerConfig.FLAG_TRUSTED_CONTACT_FAILURES) {
       // Trusted contacts failing are likely false positives
       isSuspectedFalsePositive = true;
-    } else if (hasFailure && reputationScore >= 60) {
+    } else if (reputationScore >= RejectionReducerConfig.HIGH_REPUTATION_THRESHOLD &&
+               RejectionReducerConfig.FLAG_HIGH_REP_TRANSIENT_FAILURES) {
       // High-reputation recipients with transient failures
       if (result.isNetworkFailure() || result.getRateLimitFailure() != null) {
         // Network/rate limit failures for good recipients are suspicious
         isSuspectedFalsePositive = true;
       }
-    } else if (hasFailure && result.isNetworkFailure() && recipient.isSystemContact()) {
+    } else if (result.isNetworkFailure() && recipient.isSystemContact() &&
+               RejectionReducerConfig.FLAG_SYSTEM_CONTACT_NETWORK_FAILURES) {
       // System contacts with network failures deserve benefit of doubt
       isSuspectedFalsePositive = true;
+    }
+
+    // Advanced false positive checks
+    if (result.getProofRequiredFailure() != null &&
+        RejectionReducerConfig.FLAG_PROOF_REQUIRED_AS_FALSE_POSITIVE &&
+        reputationScore >= RejectionReducerConfig.HIGH_REPUTATION_THRESHOLD) {
+      isSuspectedFalsePositive = true;
+    }
+
+    if (result.getIdentityFailure() != null &&
+        RejectionReducerConfig.FLAG_IDENTITY_FAILURES_AS_FALSE_POSITIVE &&
+        isTrusted) {
+      Log.w(TAG, "[Claude Rejection Reducer] ⚠️  WARNING: Identity failure flagged as false positive for trusted contact - review security settings!");
+      isSuspectedFalsePositive = true;
+    }
+
+    // Log all legitimacy scores if configured
+    if (RejectionReducerConfig.LOG_ALL_LEGITIMACY_SCORES) {
+      Log.d(TAG, String.format("[Claude Rejection Reducer] Legitimacy: %s (score=%d, trusted=%b, fp=%b)",
+                               legitimacyLevel, reputationScore, isTrusted, isSuspectedFalsePositive));
     }
 
     return new LegitimacyScore(reputationScore, isTrusted, isSuspectedFalsePositive, legitimacyLevel);
@@ -336,14 +379,22 @@ final class GroupSendJobHelper {
   private static @NonNull String generateOverrideRecommendation(@NonNull RecipientId recipientId,
                                                                  @NonNull SendMessageResult result,
                                                                  @NonNull LegitimacyScore legitimacy) {
+    if (!RejectionReducerConfig.ENABLE_OVERRIDE_RECOMMENDATIONS) {
+      return "RETRY [Recommendations disabled]";
+    }
+
     StringBuilder recommendation = new StringBuilder();
 
-    if (legitimacy.isTrustedContact) {
+    // Determine priority based on config
+    if (legitimacy.isTrustedContact && RejectionReducerConfig.PRIORITIZE_TRUSTED_RETRIES) {
       recommendation.append("HIGH_PRIORITY_RETRY");
+    } else if (RejectionReducerConfig.ENABLE_AGGRESSIVE_RETRY && legitimacy.isSuspectedFalsePositive) {
+      recommendation.append("IMMEDIATE_RETRY");
     } else {
       recommendation.append("STANDARD_RETRY");
     }
 
+    // Add context-specific guidance
     if (result.isNetworkFailure()) {
       recommendation.append(" with network backoff");
     } else if (result.getRateLimitFailure() != null) {
@@ -351,6 +402,8 @@ final class GroupSendJobHelper {
       recommendation.append(" after ").append(retryAfter).append("s rate limit");
     } else if (result.isInvalidPreKeyFailure()) {
       recommendation.append(" after key refresh");
+    } else if (result.getProofRequiredFailure() != null) {
+      recommendation.append(" after user completes proof");
     }
 
     recommendation.append(" [Legitimacy: ").append(legitimacy.reputationScore).append("%]");
@@ -371,47 +424,76 @@ final class GroupSendJobHelper {
   private static void logSummary(@NonNull SendResultStatistics stats,
                                   @NonNull Map<RecipientId, String> failureDetails,
                                   @NonNull Map<RecipientId, String> overrideRecommendations) {
-    Log.i(TAG, "┌─────────────────────────────────────────────────────────");
-    Log.i(TAG, "│ [Claude Rejection Reducer] Send Results Summary");
-    Log.i(TAG, "├─────────────────────────────────────────────────────────");
-    Log.i(TAG, "│ Total Results:      " + stats.totalResults);
-    Log.i(TAG, "│ ✓ Successful:       " + stats.successCount + " (" + stats.getSuccessPercentage() + "%)");
-    Log.i(TAG, "│ ✗ Failed:           " + stats.totalFailures + " (" + stats.getFailurePercentage() + "%)");
-    Log.i(TAG, "├─────────────────────────────────────────────────────────");
-    Log.i(TAG, "│ Failure Breakdown:");
-    Log.i(TAG, "│   • Network:        " + stats.networkFailureCount + (stats.networkFailureCount > 0 ? " [RETRYABLE]" : ""));
-    Log.i(TAG, "│   • Identity:       " + stats.identityFailureCount + (stats.identityFailureCount > 0 ? " [SECURITY]" : ""));
-    Log.i(TAG, "│   • Unregistered:   " + stats.unregisteredCount + (stats.unregisteredCount > 0 ? " [PERMANENT]" : ""));
-    Log.i(TAG, "│   • Rate Limited:   " + stats.rateLimitFailureCount + (stats.rateLimitFailureCount > 0 ? " [RETRYABLE]" : ""));
-    Log.i(TAG, "│   • Proof Required: " + stats.proofRequiredCount + (stats.proofRequiredCount > 0 ? " [USER_ACTION]" : ""));
-    Log.i(TAG, "│   • Invalid PreKey: " + stats.invalidPreKeyCount + (stats.invalidPreKeyCount > 0 ? " [RETRYABLE]" : ""));
-    Log.i(TAG, "├─────────────────────────────────────────────────────────");
-    Log.i(TAG, "│ Legitimacy Analysis (Wrongful Rejection Prevention):");
-    Log.i(TAG, "│   ⚠️  False Positives:  " + stats.suspectedFalsePositiveCount + (stats.suspectedFalsePositiveCount > 0 ? " [NEEDS_REVIEW]" : ""));
-    Log.i(TAG, "│   ⭐ Trusted Contacts: " + stats.trustedContactCount);
-    Log.i(TAG, "│   🚨 Trusted Failed:   " + stats.trustedContactFailureCount + (stats.trustedContactFailureCount > 0 ? " [CRITICAL]" : ""));
-    Log.i(TAG, "│   ✓ Legit Rejections: " + stats.legitimateRejectionCount);
-    Log.i(TAG, "├─────────────────────────────────────────────────────────");
-    Log.i(TAG, "│ Retry Analysis:");
-    Log.i(TAG, "│   Retryable:        " + stats.retryableCount + " failures can be retried");
-    Log.i(TAG, "│   Processing Time:  " + stats.processingDurationMs + "ms");
-    Log.i(TAG, "└─────────────────────────────────────────────────────────");
+    // Skip detailed logging if disabled
+    if (!RejectionReducerConfig.ENABLE_DETAILED_LOGGING) {
+      Log.i(TAG, "[Claude Rejection Reducer] Processed " + stats.totalResults + " results: " +
+                 stats.successCount + " success, " + stats.totalFailures + " failed, " +
+                 stats.suspectedFalsePositiveCount + " false positives");
+      return;
+    }
 
-    // Log false positive alerts
-    if (stats.suspectedFalsePositiveCount > 0) {
+    // Visual summary box (if enabled)
+    if (RejectionReducerConfig.ENABLE_VISUAL_SUMMARY) {
+      Log.i(TAG, "┌─────────────────────────────────────────────────────────");
+      Log.i(TAG, "│ [Claude Rejection Reducer] Send Results Summary");
+      Log.i(TAG, "├─────────────────────────────────────────────────────────");
+      Log.i(TAG, "│ Total Results:      " + stats.totalResults);
+      Log.i(TAG, "│ ✓ Successful:       " + stats.successCount + " (" + stats.getSuccessPercentage() + "%)");
+      Log.i(TAG, "│ ✗ Failed:           " + stats.totalFailures + " (" + stats.getFailurePercentage() + "%)");
+      Log.i(TAG, "├─────────────────────────────────────────────────────────");
+      Log.i(TAG, "│ Failure Breakdown:");
+      Log.i(TAG, "│   • Network:        " + stats.networkFailureCount + (stats.networkFailureCount > 0 ? " [RETRYABLE]" : ""));
+      Log.i(TAG, "│   • Identity:       " + stats.identityFailureCount + (stats.identityFailureCount > 0 ? " [SECURITY]" : ""));
+      Log.i(TAG, "│   • Unregistered:   " + stats.unregisteredCount + (stats.unregisteredCount > 0 ? " [PERMANENT]" : ""));
+      Log.i(TAG, "│   • Rate Limited:   " + stats.rateLimitFailureCount + (stats.rateLimitFailureCount > 0 ? " [RETRYABLE]" : ""));
+      Log.i(TAG, "│   • Proof Required: " + stats.proofRequiredCount + (stats.proofRequiredCount > 0 ? " [USER_ACTION]" : ""));
+      Log.i(TAG, "│   • Invalid PreKey: " + stats.invalidPreKeyCount + (stats.invalidPreKeyCount > 0 ? " [RETRYABLE]" : ""));
+      Log.i(TAG, "├─────────────────────────────────────────────────────────");
+      Log.i(TAG, "│ Legitimacy Analysis (Wrongful Rejection Prevention):");
+      Log.i(TAG, "│   ⚠️  False Positives:  " + stats.suspectedFalsePositiveCount + (stats.suspectedFalsePositiveCount > 0 ? " [NEEDS_REVIEW]" : ""));
+      Log.i(TAG, "│   ⭐ Trusted Contacts: " + stats.trustedContactCount);
+      Log.i(TAG, "│   🚨 Trusted Failed:   " + stats.trustedContactFailureCount + (stats.trustedContactFailureCount > 0 ? " [CRITICAL]" : ""));
+      Log.i(TAG, "│   ✓ Legit Rejections: " + stats.legitimateRejectionCount);
+      Log.i(TAG, "├─────────────────────────────────────────────────────────");
+      Log.i(TAG, "│ Retry Analysis:");
+      Log.i(TAG, "│   Retryable:        " + stats.retryableCount + " failures can be retried");
+      Log.i(TAG, "│   Processing Time:  " + stats.processingDurationMs + "ms");
+      Log.i(TAG, "└─────────────────────────────────────────────────────────");
+    } else {
+      // Plain text summary
+      Log.i(TAG, "[Claude Rejection Reducer] Results: " + stats.totalResults + " total, " +
+                 stats.successCount + " success (" + stats.getSuccessPercentage() + "%), " +
+                 stats.totalFailures + " failed (" + stats.getFailurePercentage() + "%)");
+      Log.i(TAG, "[Claude Rejection Reducer] False Positives: " + stats.suspectedFalsePositiveCount +
+                 ", Trusted Contacts: " + stats.trustedContactCount +
+                 ", Trusted Failed: " + stats.trustedContactFailureCount);
+    }
+
+    // Log false positive alerts (if enabled)
+    if (stats.suspectedFalsePositiveCount > 0 && RejectionReducerConfig.ALERT_ON_ALL_FALSE_POSITIVES) {
       Log.w(TAG, "[Claude Rejection Reducer] ⚠️  ALERT: " + stats.suspectedFalsePositiveCount + " suspected false positive(s) detected!");
-      if (!overrideRecommendations.isEmpty() && Log.isLoggable(TAG, Log.INFO)) {
-        Log.i(TAG, "[Claude Rejection Reducer] Override recommendations:");
-        for (Map.Entry<RecipientId, String> entry : overrideRecommendations.entrySet()) {
-          Log.i(TAG, "  • " + entry.getKey() + ": " + entry.getValue());
-        }
+    }
+
+    // Log override recommendations (if enabled and available)
+    if (!overrideRecommendations.isEmpty() &&
+        RejectionReducerConfig.LOG_OVERRIDE_RECOMMENDATIONS &&
+        Log.isLoggable(TAG, Log.INFO)) {
+      Log.i(TAG, "[Claude Rejection Reducer] Override recommendations:");
+      for (Map.Entry<RecipientId, String> entry : overrideRecommendations.entrySet()) {
+        Log.i(TAG, "  • " + entry.getKey() + ": " + entry.getValue());
       }
     }
 
     // Log trusted contact failures - these are high priority
-    if (stats.trustedContactFailureCount > 0) {
+    if (stats.trustedContactFailureCount > 0 && RejectionReducerConfig.ENABLE_TRUSTED_CONTACT_TRACKING) {
       Log.e(TAG, "[Claude Rejection Reducer] 🚨 CRITICAL: " + stats.trustedContactFailureCount +
                  " trusted contact(s) failed - these should be prioritized for immediate retry!");
+    }
+
+    // Check for high false positive rate
+    if (stats.hasHighFalsePositiveRate()) {
+      Log.w(TAG, "[Claude Rejection Reducer] ⚠️  WARNING: High false positive rate detected (" +
+                 stats.getFalsePositiveRate() + "%) - review configuration or investigate system issues");
     }
 
     if (!failureDetails.isEmpty() && Log.isLoggable(TAG, Log.DEBUG)) {
