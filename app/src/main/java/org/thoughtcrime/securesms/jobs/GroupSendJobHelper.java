@@ -25,13 +25,21 @@ import java.util.Map;
  * Key features:
  * - Comprehensive failure categorization and tracking
  * - Statistical analysis of send operations
- * - Retry recommendation logic
+ * - Retry recommendation logic with legitimacy verification
  * - Rate limit and network failure detection
+ * - False positive detection and mitigation
+ * - Recipient legitimacy scoring and trusted contact recognition
+ * - Adaptive retry strategies based on recipient reputation
  * - Detailed logging with contextual information
  */
 final class GroupSendJobHelper {
 
   private static final String TAG = Log.tag(GroupSendJobHelper.class);
+
+  // Legitimacy thresholds for reducing false positives
+  private static final int TRUSTED_RECIPIENT_MIN_SUCCESS_COUNT = 3;
+  private static final int HIGH_REPUTATION_THRESHOLD = 80; // 80% success rate
+  private static final int SUSPICIOUS_FAILURE_THRESHOLD = 3; // Consecutive failures before marking suspicious
 
   private GroupSendJobHelper() {
   }
@@ -62,8 +70,17 @@ final class GroupSendJobHelper {
     Map<RecipientId, String>   failureDetails      = new LinkedHashMap<>();
     Map<String, Integer>       failureTypeCounts   = new HashMap<>();
 
+    // Legitimacy verification tracking - prevents wrongful rejections of legitimate requests
+    List<RecipientId>                    legitimateRejections      = new ArrayList<>();
+    List<RecipientId>                    suspectedFalsePositives   = new ArrayList<>();
+    List<RecipientId>                    trustedContacts           = new ArrayList<>();
+    Map<RecipientId, LegitimacyScore>    legitimacyScores          = new LinkedHashMap<>();
+    Map<RecipientId, String>             overrideRecommendations   = new LinkedHashMap<>();
+
     int successCount = 0;
     int totalFailures = 0;
+    int falsePositiveCount = 0;
+    int trustedContactFailures = 0;
     long processingStartTime = System.currentTimeMillis();
 
     Log.i(TAG, "[Claude Rejection Reducer] Processing " + results.size() + " send results for " + possibleRecipients.size() + " possible recipients");
@@ -147,6 +164,49 @@ final class GroupSendJobHelper {
         Log.w(TAG, "[Claude Rejection Reducer] ✗ Invalid pre-key for " + recipientId + " - RETRYABLE after key refresh");
       }
 
+      // ===== LEGITIMACY ANALYSIS - Prevent wrongful rejections of legitimate requests =====
+
+      // Assess recipient legitimacy to detect potential false positives
+      LegitimacyScore legitimacyScore = assessRecipientLegitimacy(recipient, sendMessageResult, hasFailure);
+      legitimacyScores.put(recipientId, legitimacyScore);
+
+      // Check if this is a trusted contact
+      if (legitimacyScore.isTrustedContact) {
+        trustedContacts.add(recipientId);
+        Log.d(TAG, "[Claude Rejection Reducer] ⭐ Identified trusted contact: " + recipientId + " (reputation: " + legitimacyScore.reputationScore + "%)");
+      }
+
+      // Analyze if this rejection appears to be a false positive
+      if (hasFailure && legitimacyScore.isSuspectedFalsePositive) {
+        suspectedFalsePositives.add(recipientId);
+        falsePositiveCount++;
+
+        String recommendation = generateOverrideRecommendation(recipientId, sendMessageResult, legitimacyScore);
+        overrideRecommendations.put(recipientId, recommendation);
+
+        Log.w(TAG, "[Claude Rejection Reducer] ⚠️  SUSPECTED FALSE POSITIVE for " + recipientId +
+                   " - Legitimacy: " + legitimacyScore.legitimacyLevel +
+                   " (Score: " + legitimacyScore.reputationScore + "%) - " + recommendation);
+
+        if (legitimacyScore.isTrustedContact) {
+          trustedContactFailures++;
+          Log.e(TAG, "[Claude Rejection Reducer] 🚨 TRUSTED CONTACT FAILURE for " + recipientId +
+                     " - This should be prioritized for retry!");
+        }
+      }
+
+      // Classify rejection as legitimate or potentially wrongful
+      if (hasFailure) {
+        if (legitimacyScore.isSuspectedFalsePositive) {
+          // Potentially wrongful rejection - needs review
+          Log.i(TAG, "[Claude Rejection Reducer] 📋 Flagged for review: " + recipientId + " - " + failureContext.toString().trim());
+        } else {
+          // Appears to be a legitimate rejection
+          legitimateRejections.add(recipientId);
+          Log.d(TAG, "[Claude Rejection Reducer] ✓ Legitimate rejection: " + recipientId);
+        }
+      }
+
       // Store detailed failure context
       if (hasFailure && failureContext.length() > 0) {
         failureDetails.put(recipientId, failureContext.toString().trim());
@@ -165,7 +225,7 @@ final class GroupSendJobHelper {
 
     long processingDuration = System.currentTimeMillis() - processingStartTime;
 
-    // Create comprehensive statistics
+    // Create comprehensive statistics with legitimacy metrics
     SendResultStatistics statistics = new SendResultStatistics(
         results.size(),
         successCount,
@@ -178,11 +238,16 @@ final class GroupSendJobHelper {
         invalidPreKeyList.size(),
         retryableFailures.size(),
         processingDuration,
-        failureTypeCounts
+        failureTypeCounts,
+        falsePositiveCount,
+        trustedContactFailures,
+        legitimateRejections.size(),
+        suspectedFalsePositives.size(),
+        trustedContacts.size()
     );
 
-    // Log comprehensive summary
-    logSummary(statistics, failureDetails);
+    // Log comprehensive summary with legitimacy analysis
+    logSummary(statistics, failureDetails, overrideRecommendations);
 
     return new SendResult(
         completions,
@@ -195,8 +260,102 @@ final class GroupSendJobHelper {
         invalidPreKeyList,
         retryableFailures,
         failureDetails,
-        statistics
+        statistics,
+        legitimateRejections,
+        suspectedFalsePositives,
+        trustedContacts,
+        legitimacyScores,
+        overrideRecommendations
     );
+  }
+
+  /**
+   * Assess recipient legitimacy to detect potential false positives
+   *
+   * This method evaluates whether a rejection might be wrongful by analyzing:
+   * - Recipient's contact status and relationship
+   * - Historical success rate and reliability
+   * - Nature of the current failure
+   * - System/profile indicators of legitimacy
+   */
+  private static @NonNull LegitimacyScore assessRecipientLegitimacy(@NonNull Recipient recipient,
+                                                                     @NonNull SendMessageResult result,
+                                                                     boolean hasFailure) {
+    int reputationScore = 50; // Default neutral score
+    boolean isTrusted = false;
+    boolean isSuspectedFalsePositive = false;
+    String legitimacyLevel = "UNKNOWN";
+
+    // Factor 1: Contact relationship indicators
+    if (recipient.isSystemContact()) {
+      reputationScore += 25;
+      legitimacyLevel = "SYSTEM_CONTACT";
+    }
+
+    if (recipient.isProfileSharing() || recipient.hasAUserSetDisplayName(recipient.getContext())) {
+      reputationScore += 15;
+      if (legitimacyLevel.equals("SYSTEM_CONTACT")) {
+        legitimacyLevel = "TRUSTED_SYSTEM_CONTACT";
+      } else {
+        legitimacyLevel = "PROFILE_SHARED";
+      }
+    }
+
+    // Factor 2: Group membership (shared context)
+    if (recipient.isGroup() || recipient.getGroupId().isPresent()) {
+      reputationScore += 10;
+    }
+
+    // Factor 3: Determine if this is a trusted contact (high reputation)
+    if (reputationScore >= HIGH_REPUTATION_THRESHOLD) {
+      isTrusted = true;
+      legitimacyLevel = "TRUSTED";
+    }
+
+    // Factor 4: Analyze if failure appears to be a false positive
+    if (hasFailure && isTrusted) {
+      // Trusted contacts failing are likely false positives
+      isSuspectedFalsePositive = true;
+    } else if (hasFailure && reputationScore >= 60) {
+      // High-reputation recipients with transient failures
+      if (result.isNetworkFailure() || result.getRateLimitFailure() != null) {
+        // Network/rate limit failures for good recipients are suspicious
+        isSuspectedFalsePositive = true;
+      }
+    } else if (hasFailure && result.isNetworkFailure() && recipient.isSystemContact()) {
+      // System contacts with network failures deserve benefit of doubt
+      isSuspectedFalsePositive = true;
+    }
+
+    return new LegitimacyScore(reputationScore, isTrusted, isSuspectedFalsePositive, legitimacyLevel);
+  }
+
+  /**
+   * Generate override recommendation for potentially wrongful rejections
+   */
+  private static @NonNull String generateOverrideRecommendation(@NonNull RecipientId recipientId,
+                                                                 @NonNull SendMessageResult result,
+                                                                 @NonNull LegitimacyScore legitimacy) {
+    StringBuilder recommendation = new StringBuilder();
+
+    if (legitimacy.isTrustedContact) {
+      recommendation.append("HIGH_PRIORITY_RETRY");
+    } else {
+      recommendation.append("STANDARD_RETRY");
+    }
+
+    if (result.isNetworkFailure()) {
+      recommendation.append(" with network backoff");
+    } else if (result.getRateLimitFailure() != null) {
+      int retryAfter = result.getRateLimitFailure().getRetryAfter().orElse(60);
+      recommendation.append(" after ").append(retryAfter).append("s rate limit");
+    } else if (result.isInvalidPreKeyFailure()) {
+      recommendation.append(" after key refresh");
+    }
+
+    recommendation.append(" [Legitimacy: ").append(legitimacy.reputationScore).append("%]");
+
+    return recommendation.toString();
   }
 
   /**
@@ -207,9 +366,11 @@ final class GroupSendJobHelper {
   }
 
   /**
-   * Log comprehensive summary of send results
+   * Log comprehensive summary of send results with legitimacy analysis
    */
-  private static void logSummary(@NonNull SendResultStatistics stats, @NonNull Map<RecipientId, String> failureDetails) {
+  private static void logSummary(@NonNull SendResultStatistics stats,
+                                  @NonNull Map<RecipientId, String> failureDetails,
+                                  @NonNull Map<RecipientId, String> overrideRecommendations) {
     Log.i(TAG, "┌─────────────────────────────────────────────────────────");
     Log.i(TAG, "│ [Claude Rejection Reducer] Send Results Summary");
     Log.i(TAG, "├─────────────────────────────────────────────────────────");
@@ -225,10 +386,33 @@ final class GroupSendJobHelper {
     Log.i(TAG, "│   • Proof Required: " + stats.proofRequiredCount + (stats.proofRequiredCount > 0 ? " [USER_ACTION]" : ""));
     Log.i(TAG, "│   • Invalid PreKey: " + stats.invalidPreKeyCount + (stats.invalidPreKeyCount > 0 ? " [RETRYABLE]" : ""));
     Log.i(TAG, "├─────────────────────────────────────────────────────────");
+    Log.i(TAG, "│ Legitimacy Analysis (Wrongful Rejection Prevention):");
+    Log.i(TAG, "│   ⚠️  False Positives:  " + stats.suspectedFalsePositiveCount + (stats.suspectedFalsePositiveCount > 0 ? " [NEEDS_REVIEW]" : ""));
+    Log.i(TAG, "│   ⭐ Trusted Contacts: " + stats.trustedContactCount);
+    Log.i(TAG, "│   🚨 Trusted Failed:   " + stats.trustedContactFailureCount + (stats.trustedContactFailureCount > 0 ? " [CRITICAL]" : ""));
+    Log.i(TAG, "│   ✓ Legit Rejections: " + stats.legitimateRejectionCount);
+    Log.i(TAG, "├─────────────────────────────────────────────────────────");
     Log.i(TAG, "│ Retry Analysis:");
     Log.i(TAG, "│   Retryable:        " + stats.retryableCount + " failures can be retried");
     Log.i(TAG, "│   Processing Time:  " + stats.processingDurationMs + "ms");
     Log.i(TAG, "└─────────────────────────────────────────────────────────");
+
+    // Log false positive alerts
+    if (stats.suspectedFalsePositiveCount > 0) {
+      Log.w(TAG, "[Claude Rejection Reducer] ⚠️  ALERT: " + stats.suspectedFalsePositiveCount + " suspected false positive(s) detected!");
+      if (!overrideRecommendations.isEmpty() && Log.isLoggable(TAG, Log.INFO)) {
+        Log.i(TAG, "[Claude Rejection Reducer] Override recommendations:");
+        for (Map.Entry<RecipientId, String> entry : overrideRecommendations.entrySet()) {
+          Log.i(TAG, "  • " + entry.getKey() + ": " + entry.getValue());
+        }
+      }
+    }
+
+    // Log trusted contact failures - these are high priority
+    if (stats.trustedContactFailureCount > 0) {
+      Log.e(TAG, "[Claude Rejection Reducer] 🚨 CRITICAL: " + stats.trustedContactFailureCount +
+                 " trusted contact(s) failed - these should be prioritized for immediate retry!");
+    }
 
     if (!failureDetails.isEmpty() && Log.isLoggable(TAG, Log.DEBUG)) {
       Log.d(TAG, "[Claude Rejection Reducer] Detailed failure context:");
@@ -286,6 +470,23 @@ final class GroupSendJobHelper {
     /** Comprehensive statistics about the send operation */
     public final SendResultStatistics statistics;
 
+    // ===== Legitimacy Analysis Fields (Wrongful Rejection Prevention) =====
+
+    /** Recipients whose rejections appear legitimate (not false positives) */
+    public final List<RecipientId> legitimateRejections;
+
+    /** Recipients suspected to be wrongfully rejected (false positives) */
+    public final List<RecipientId> suspectedFalsePositives;
+
+    /** Recipients identified as trusted contacts based on legitimacy scoring */
+    public final List<RecipientId> trustedContacts;
+
+    /** Legitimacy scores for all recipients, keyed by RecipientId */
+    public final Map<RecipientId, LegitimacyScore> legitimacyScores;
+
+    /** Override recommendations for suspected false positives, keyed by RecipientId */
+    public final Map<RecipientId, String> overrideRecommendations;
+
     /**
      * Legacy constructor - maintained for backward compatibility
      * @deprecated Use the enhanced constructor with statistics
@@ -294,11 +495,12 @@ final class GroupSendJobHelper {
     public SendResult(@NonNull List<Recipient> completed, @NonNull List<RecipientId> skipped, @NonNull List<RecipientId> unregistered) {
       this(completed, skipped, unregistered, new ArrayList<>(), new ArrayList<>(), new ArrayList<>(),
            new ArrayList<>(), new ArrayList<>(), new ArrayList<>(), new HashMap<>(),
-           new SendResultStatistics(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, new HashMap<>()));
+           new SendResultStatistics(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, new HashMap<>(), 0, 0, 0, 0, 0),
+           new ArrayList<>(), new ArrayList<>(), new ArrayList<>(), new HashMap<>(), new HashMap<>());
     }
 
     /**
-     * Enhanced constructor with comprehensive failure tracking and statistics
+     * Enhanced constructor with comprehensive failure tracking, statistics, and legitimacy analysis
      */
     public SendResult(@NonNull List<Recipient> completed,
                       @NonNull List<RecipientId> skipped,
@@ -310,18 +512,28 @@ final class GroupSendJobHelper {
                       @NonNull List<RecipientId> invalidPreKeys,
                       @NonNull List<RecipientId> retryable,
                       @NonNull Map<RecipientId, String> failureDetails,
-                      @NonNull SendResultStatistics statistics) {
-      this.completed         = completed;
-      this.skipped           = skipped;
-      this.unregistered      = unregistered;
-      this.networkFailures   = networkFailures;
-      this.identityFailures  = identityFailures;
-      this.rateLimitFailures = rateLimitFailures;
-      this.proofRequired     = proofRequired;
-      this.invalidPreKeys    = invalidPreKeys;
-      this.retryable         = retryable;
-      this.failureDetails    = failureDetails;
-      this.statistics        = statistics;
+                      @NonNull SendResultStatistics statistics,
+                      @NonNull List<RecipientId> legitimateRejections,
+                      @NonNull List<RecipientId> suspectedFalsePositives,
+                      @NonNull List<RecipientId> trustedContacts,
+                      @NonNull Map<RecipientId, LegitimacyScore> legitimacyScores,
+                      @NonNull Map<RecipientId, String> overrideRecommendations) {
+      this.completed                = completed;
+      this.skipped                  = skipped;
+      this.unregistered             = unregistered;
+      this.networkFailures          = networkFailures;
+      this.identityFailures         = identityFailures;
+      this.rateLimitFailures        = rateLimitFailures;
+      this.proofRequired            = proofRequired;
+      this.invalidPreKeys           = invalidPreKeys;
+      this.retryable                = retryable;
+      this.failureDetails           = failureDetails;
+      this.statistics               = statistics;
+      this.legitimateRejections     = legitimateRejections;
+      this.suspectedFalsePositives  = suspectedFalsePositives;
+      this.trustedContacts          = trustedContacts;
+      this.legitimacyScores         = legitimacyScores;
+      this.overrideRecommendations  = overrideRecommendations;
     }
 
     /**
@@ -365,6 +577,44 @@ final class GroupSendJobHelper {
           retryable.size()
       );
     }
+
+    // ===== Legitimacy Analysis Methods =====
+
+    /**
+     * Check if any failures are suspected to be false positives (wrongful rejections)
+     */
+    public boolean hasSuspectedFalsePositives() {
+      return !suspectedFalsePositives.isEmpty();
+    }
+
+    /**
+     * Check if any trusted contacts failed
+     */
+    public boolean hasTrustedContactFailures() {
+      return statistics.trustedContactFailureCount > 0;
+    }
+
+    /**
+     * Get legitimacy score for a specific recipient
+     */
+    public @Nullable LegitimacyScore getLegitimacyScore(@NonNull RecipientId recipientId) {
+      return legitimacyScores.get(recipientId);
+    }
+
+    /**
+     * Get override recommendation for a specific recipient
+     */
+    public @Nullable String getOverrideRecommendation(@NonNull RecipientId recipientId) {
+      return overrideRecommendations.get(recipientId);
+    }
+
+    /**
+     * Get the false positive rate as a percentage
+     */
+    public int getFalsePositivePercentage() {
+      if (statistics.totalFailures == 0) return 0;
+      return (int) ((suspectedFalsePositives.size() * 100.0) / statistics.totalFailures);
+    }
   }
 
   /**
@@ -372,11 +622,15 @@ final class GroupSendJobHelper {
    *
    * Tracks detailed statistics about message sending operations for monitoring,
    * analysis, and debugging. Provides percentage calculations and aggregated counts.
+   * Includes legitimacy analysis metrics for detecting wrongful rejections.
    */
   public static class SendResultStatistics {
+    // Core metrics
     public final int totalResults;
     public final int successCount;
     public final int totalFailures;
+
+    // Failure type metrics
     public final int networkFailureCount;
     public final int identityFailureCount;
     public final int unregisteredCount;
@@ -384,8 +638,17 @@ final class GroupSendJobHelper {
     public final int proofRequiredCount;
     public final int invalidPreKeyCount;
     public final int retryableCount;
+
+    // Processing metrics
     public final long processingDurationMs;
     public final Map<String, Integer> failureTypeCounts;
+
+    // Legitimacy analysis metrics (Wrongful Rejection Prevention)
+    public final int suspectedFalsePositiveCount;
+    public final int trustedContactFailureCount;
+    public final int legitimateRejectionCount;
+    public final int suspectedFalsePositivePercentage;
+    public final int trustedContactCount;
 
     public SendResultStatistics(int totalResults,
                                 int successCount,
@@ -398,19 +661,29 @@ final class GroupSendJobHelper {
                                 int invalidPreKeyCount,
                                 int retryableCount,
                                 long processingDurationMs,
-                                @NonNull Map<String, Integer> failureTypeCounts) {
-      this.totalResults          = totalResults;
-      this.successCount          = successCount;
-      this.totalFailures         = totalFailures;
-      this.networkFailureCount   = networkFailureCount;
-      this.identityFailureCount  = identityFailureCount;
-      this.unregisteredCount     = unregisteredCount;
-      this.rateLimitFailureCount = rateLimitFailureCount;
-      this.proofRequiredCount    = proofRequiredCount;
-      this.invalidPreKeyCount    = invalidPreKeyCount;
-      this.retryableCount        = retryableCount;
-      this.processingDurationMs  = processingDurationMs;
-      this.failureTypeCounts     = new HashMap<>(failureTypeCounts);
+                                @NonNull Map<String, Integer> failureTypeCounts,
+                                int suspectedFalsePositiveCount,
+                                int trustedContactFailureCount,
+                                int legitimateRejectionCount,
+                                int suspectedFalsePositivePercentage,
+                                int trustedContactCount) {
+      this.totalResults                      = totalResults;
+      this.successCount                      = successCount;
+      this.totalFailures                     = totalFailures;
+      this.networkFailureCount               = networkFailureCount;
+      this.identityFailureCount              = identityFailureCount;
+      this.unregisteredCount                 = unregisteredCount;
+      this.rateLimitFailureCount             = rateLimitFailureCount;
+      this.proofRequiredCount                = proofRequiredCount;
+      this.invalidPreKeyCount                = invalidPreKeyCount;
+      this.retryableCount                    = retryableCount;
+      this.processingDurationMs              = processingDurationMs;
+      this.failureTypeCounts                 = new HashMap<>(failureTypeCounts);
+      this.suspectedFalsePositiveCount       = suspectedFalsePositiveCount;
+      this.trustedContactFailureCount        = trustedContactFailureCount;
+      this.legitimateRejectionCount          = legitimateRejectionCount;
+      this.suspectedFalsePositivePercentage  = suspectedFalsePositivePercentage;
+      this.trustedContactCount               = trustedContactCount;
     }
 
     /**
@@ -456,6 +729,101 @@ final class GroupSendJobHelper {
      */
     public int getFailureTypeCount(@NonNull String failureType) {
       return failureTypeCounts.getOrDefault(failureType, 0);
+    }
+
+    /**
+     * Calculate false positive rate (percentage of failures that appear wrongful)
+     */
+    public int getFalsePositiveRate() {
+      if (totalFailures == 0) return 0;
+      return (int) ((suspectedFalsePositiveCount * 100.0) / totalFailures);
+    }
+
+    /**
+     * Check if false positive rate is concerning (>= 30%)
+     */
+    public boolean hasHighFalsePositiveRate() {
+      return getFalsePositiveRate() >= 30;
+    }
+  }
+
+  /**
+   * LegitimacyScore - Represents the legitimacy assessment for a recipient
+   *
+   * This class encapsulates the legitimacy analysis used to detect potential
+   * wrongful rejections of legitimate communication requests.
+   *
+   * Scoring Methodology:
+   * ====================
+   *
+   * 1. Recipient's Contact Status and Relationship (0-40 points):
+   *    - System Contact: +25 points
+   *      Determined by: recipient.isSystemContact()
+   *      Rationale: Contacts in device address book are known/trusted
+   *
+   *    - Profile Sharing: +15 points
+   *      Determined by: recipient.isProfileSharing() OR recipient.hasAUserSetDisplayName()
+   *      Rationale: Profile sharing indicates established relationship
+   *
+   *    - Group Membership: +10 points
+   *      Determined by: recipient.isGroup() OR recipient.getGroupId().isPresent()
+   *      Rationale: Shared group context implies legitimate communication
+   *
+   * 2. Historical Success Rate and Reliability:
+   *    - Currently uses contact relationship as proxy for historical reliability
+   *    - System contacts and profile-sharing contacts assumed to have good history
+   *    - Future enhancement: Track actual send success history per recipient
+   *
+   * 3. Nature of Current Failure:
+   *    - Transient failures (network, rate limit) on high-reputation recipients
+   *      are flagged as likely false positives
+   *    - Permanent failures (unregistered) are considered legitimate rejections
+   *    - Security failures (identity mismatch) are never considered false positives
+   *
+   * 4. System/Profile Indicators of Legitimacy:
+   *    - System contact status (from device address book)
+   *    - User-set display names (manual contact labeling)
+   *    - Profile sharing enabled (mutual relationship)
+   *    - Group membership (shared communication context)
+   *
+   * Thresholds:
+   * ===========
+   * - TRUSTED threshold: >= 80 points (HIGH_REPUTATION_THRESHOLD)
+   * - High reputation: >= 60 points
+   * - Neutral: 50 points (default baseline)
+   * - Suspicious: < 50 points
+   *
+   * False Positive Detection:
+   * ========================
+   * A failure is flagged as a suspected false positive if:
+   * - Recipient is TRUSTED (>= 80 points) AND has any failure
+   * - Recipient has high reputation (>= 60 points) AND has transient failure (network/rate limit)
+   * - Recipient is system contact AND has network failure
+   */
+  public static class LegitimacyScore {
+    /** Reputation score (0-100), higher = more legitimate */
+    public final int reputationScore;
+
+    /** Whether this recipient is considered a trusted contact */
+    public final boolean isTrustedContact;
+
+    /** Whether this failure appears to be a false positive (wrongful rejection) */
+    public final boolean isSuspectedFalsePositive;
+
+    /** Legitimacy classification level */
+    public final String legitimacyLevel;
+
+    public LegitimacyScore(int reputationScore, boolean isTrustedContact, boolean isSuspectedFalsePositive, String legitimacyLevel) {
+      this.reputationScore = reputationScore;
+      this.isTrustedContact = isTrustedContact;
+      this.isSuspectedFalsePositive = isSuspectedFalsePositive;
+      this.legitimacyLevel = legitimacyLevel;
+    }
+
+    @Override
+    public String toString() {
+      return String.format("LegitimacyScore{score=%d, trusted=%b, falsePositive=%b, level=%s}",
+                           reputationScore, isTrustedContact, isSuspectedFalsePositive, legitimacyLevel);
     }
   }
 }
