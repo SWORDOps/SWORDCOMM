@@ -5,7 +5,6 @@
 #include "cache_operations.h"
 #include "memory_scrambler.h"
 #include "timing_obfuscation.h"
-#include "hypervisor_disruptor.h"
 #include "ml_kem_1024.h"
 #include "ml_dsa_87.h"
 
@@ -121,88 +120,6 @@ JNIEXPORT void JNICALL
 Java_im_molly_security_TimingObfuscation_nativeJitterSleep(JNIEnv* env, jclass /* clazz */,
     jint baseMs, jint jitterPercent) {
     TimingObfuscation::jitter_sleep_ms(baseMs, jitterPercent);
-}
-
-// ============================================================================
-// Hypervisor Disruptor JNI Bindings
-// ============================================================================
-
-JNIEXPORT void JNICALL
-Java_im_molly_security_HypervisorDisruptor_nativeClockReadFlood(JNIEnv* env, jclass /* clazz */,
-    jint iterations) {
-    HypervisorDisruptor::clock_read_flood(iterations);
-}
-
-JNIEXPORT void JNICALL
-Java_im_molly_security_HypervisorDisruptor_nativeClockSourceChaos(JNIEnv* env, jclass /* clazz */,
-    jint durationMs) {
-    HypervisorDisruptor::clock_source_chaos(durationMs);
-}
-
-JNIEXPORT void JNICALL
-Java_im_molly_security_HypervisorDisruptor_nativeTimerArmDisarmFlood(JNIEnv* env, jclass /* clazz */,
-    jint cycles) {
-    HypervisorDisruptor::timer_arm_disarm_flood(cycles);
-}
-
-JNIEXPORT void JNICALL
-Java_im_molly_security_HypervisorDisruptor_nativeTimerInterruptChaos(JNIEnv* env, jclass /* clazz */,
-    jint intensityPercent) {
-    HypervisorDisruptor::timer_interrupt_chaos(intensityPercent);
-}
-
-JNIEXPORT void JNICALL
-Java_im_molly_security_HypervisorDisruptor_nativeYieldChaos(JNIEnv* env, jclass /* clazz */,
-    jint iterations, jint intensityPercent) {
-    HypervisorDisruptor::yield_chaos(iterations, intensityPercent);
-}
-
-JNIEXPORT void JNICALL
-Java_im_molly_security_HypervisorDisruptor_nativeThreadFlood(JNIEnv* env, jclass /* clazz */,
-    jint threadCount, jint iterations) {
-    HypervisorDisruptor::thread_flood(threadCount, iterations);
-}
-
-JNIEXPORT void JNICALL
-Java_im_molly_security_HypervisorDisruptor_nativeBranchTimingFlood(JNIEnv* env, jclass /* clazz */,
-    jint iterations) {
-    HypervisorDisruptor::branch_timing_flood(iterations);
-}
-
-JNIEXPORT void JNICALL
-Java_im_molly_security_HypervisorDisruptor_nativeCacheTimingNoise(JNIEnv* env, jclass /* clazz */,
-    jint iterations, jint bufferSizeKb) {
-    HypervisorDisruptor::cache_timing_noise(iterations, bufferSizeKb);
-}
-
-JNIEXPORT void JNICALL
-Java_im_molly_security_HypervisorDisruptor_nativeSyscallFlood(JNIEnv* env, jclass /* clazz */,
-    jint iterations) {
-    HypervisorDisruptor::syscall_flood(iterations);
-}
-
-JNIEXPORT void JNICALL
-Java_im_molly_security_HypervisorDisruptor_nativeGettimeFlood(JNIEnv* env, jclass /* clazz */,
-    jint iterations) {
-    HypervisorDisruptor::gettime_flood(iterations);
-}
-
-JNIEXPORT void JNICALL
-Java_im_molly_security_HypervisorDisruptor_nativeMaximumTimingChaos(JNIEnv* env, jclass /* clazz */,
-    jint durationMs, jint intensityPercent) {
-    HypervisorDisruptor::maximum_timing_chaos(durationMs, intensityPercent);
-}
-
-JNIEXPORT void JNICALL
-Java_im_molly_security_HypervisorDisruptor_nativeContinuousTimingChaos(JNIEnv* env, jclass /* clazz */,
-    jint intensityPercent, jboolean enableGallopDash) {
-    HypervisorDisruptor::continuous_timing_chaos(intensityPercent, enableGallopDash == JNI_TRUE);
-}
-
-JNIEXPORT void JNICALL
-Java_im_molly_security_HypervisorDisruptor_nativeAdaptiveTimingChaos(JNIEnv* env, jclass /* clazz */,
-    jint durationMs) {
-    HypervisorDisruptor::adaptive_timing_chaos(durationMs);
 }
 
 // ============================================================================
