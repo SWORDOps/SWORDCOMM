@@ -151,43 +151,6 @@ class AdaptiveCountermeasures private constructor() {
                     MemoryScrambler.fillAvailableRAM(30)
                 }
             }
-
-            // Apply hypervisor timing disruption based on threat level
-            if (analysis.threatLevel >= 0.35f) {
-                launch {
-                    val enableGallopDash = analysis.getThreatCategory() == ThreatCategory.CRITICAL ||
-                                          analysis.getThreatCategory() == ThreatCategory.NUCLEAR
-
-                    when (analysis.getThreatCategory()) {
-                        ThreatCategory.MEDIUM -> {
-                            // Light timing chaos
-                            HypervisorDisruptor.clockReadFlood(1000)
-                            HypervisorDisruptor.gettimeFlood(2000)
-                        }
-                        ThreatCategory.HIGH -> {
-                            // Moderate timing chaos
-                            HypervisorDisruptor.clockSourceChaos(500)
-                            HypervisorDisruptor.timerInterruptChaos(50)
-                            HypervisorDisruptor.syscallFlood(5000)
-                        }
-                        ThreatCategory.CRITICAL -> {
-                            // Heavy timing chaos with gallop dash
-                            HypervisorDisruptor.continuousTimingChaos(75, true)
-                            HypervisorDisruptor.threadFlood(4, 5)
-                            HypervisorDisruptor.cacheTimingNoise(500, 128)
-                        }
-                        ThreatCategory.NUCLEAR -> {
-                            // MAXIMUM TIMING CHAOS - "bury them with bullshit"
-                            HypervisorDisruptor.maximumTimingChaos(2000, 100)
-                            HypervisorDisruptor.adaptiveTimingChaos(3000)
-                        }
-                        else -> {
-                            // Minimal disruption
-                            HypervisorDisruptor.gettimeFlood(500)
-                        }
-                    }
-                }
-            }
         }
     }
 

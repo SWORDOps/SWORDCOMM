@@ -43,7 +43,6 @@ add_library(molly_security SHARED
     cache_operations.cpp
     memory_scrambler.cpp
     timing_obfuscation.cpp
-    hypervisor_disruptor.cpp
     kyber1024.cpp
     security_keywords.cpp
     ${CRYPTO_SOURCES}
