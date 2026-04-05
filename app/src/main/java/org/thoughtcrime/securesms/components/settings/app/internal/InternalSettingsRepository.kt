@@ -19,6 +19,8 @@ import org.thoughtcrime.securesms.jobs.InAppPaymentRecurringContextJob
 import org.thoughtcrime.securesms.keyvalue.SignalStore
 import org.thoughtcrime.securesms.notifications.v2.ConversationId
 import org.thoughtcrime.securesms.recipients.Recipient
+import org.thoughtcrime.securesms.components.settings.app.subscription.InAppPaymentsRepository
+import org.thoughtcrime.securesms.database.model.InAppPaymentSubscriberRecord
 import org.thoughtcrime.securesms.releasechannel.ReleaseChannel
 import java.util.UUID
 import kotlin.time.Duration.Companion.days
@@ -30,6 +32,12 @@ class InternalSettingsRepository(context: Context) {
   fun getEmojiVersionInfo(consumer: (EmojiFiles.Version?) -> Unit) {
     SignalExecutors.BOUNDED.execute {
       consumer(EmojiFiles.Version.readVersion(context))
+    }
+  }
+
+  fun getIsDonationSubscriber(consumer: (Boolean) -> Unit) {
+    SignalExecutors.BOUNDED.execute {
+      consumer(InAppPaymentsRepository.getSubscriber(InAppPaymentSubscriberRecord.Type.DONATION) != null)
     }
   }
 

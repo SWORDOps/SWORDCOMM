@@ -641,8 +641,7 @@ class InternalSettingsFragment : DSLSettingsFragment(R.string.preferences__inter
 
       dividerPref()
 
-      // TODO [alex] -- db access on main thread!
-      if (InAppPaymentsRepository.getSubscriber(InAppPaymentSubscriberRecord.Type.DONATION) != null) {
+      if (state.isDonationSubscriber) {
         sectionHeaderPref(DSLSettingsText.from("Badges"))
 
         clickPref(
