@@ -23,6 +23,10 @@ class InternalSettingsViewModel(private val repository: InternalSettingsReposito
       store.update { it.copy(emojiVersion = version) }
     }
 
+    repository.getIsDonationSubscriber { isDonationSubscriber ->
+      store.update { it.copy(isDonationSubscriber = isDonationSubscriber) }
+    }
+
     val pendingOneTimeDonation: Observable<Boolean> = SignalStore.inAppPayments.observablePendingOneTimeDonation
       .distinctUntilChanged()
       .map { it.isPresent }
@@ -147,7 +151,7 @@ class InternalSettingsViewModel(private val repository: InternalSettingsReposito
   }
 
   fun refresh() {
-    store.update { getState().copy(emojiVersion = it.emojiVersion) }
+    store.update { getState().copy(emojiVersion = it.emojiVersion, isDonationSubscriber = it.isDonationSubscriber) }
   }
 
   private fun getState() = InternalSettingsState(
@@ -173,6 +177,7 @@ class InternalSettingsViewModel(private val repository: InternalSettingsReposito
     disableStorageService = SignalStore.internal.storageServiceDisabled,
     canClearOnboardingState = SignalStore.story.hasDownloadedOnboardingStory && Stories.isFeatureEnabled(),
     useConversationItemV2ForMedia = SignalStore.internal.useConversationItemV2Media,
+    isDonationSubscriber = false,
     hasPendingOneTimeDonation = SignalStore.inAppPayments.getPendingOneTimeDonation() != null,
     hevcEncoding = SignalStore.internal.hevcEncoding,
     newCallingUi = SignalStore.internal.newCallingUi,
