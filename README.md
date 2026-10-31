@@ -1,5 +1,9 @@
 # Molly Security Translation
 
+## Project status: Unfinished
+
+This project is unfinished. I could not find a way to securely communicate between Android Keystore and its iOS equivalent, and other projects have taken priority.
+
 ## Danish-English Translation with Maximum EL2 Defense
 
 ### Build Status
