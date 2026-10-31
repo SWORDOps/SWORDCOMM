@@ -1,672 +1,202 @@
-# Molly Security Translation
+# SWORDCOMM for Android
+
+An unfinished messaging project based on Molly, a fork of Signal. SWORDCOMM explores additional cryptography, device-security monitoring and input protection around that messaging foundation.
+
+[Build guide](DOCKER_BUILD.md) · [Technical documentation](docs/) · [iOS project](https://github.com/SWORDOps/Swordcomm-IOS) · [Issues](https://github.com/SWORDOps/SWORDCOMM/issues)
 
 ## Project status: Unfinished
 
 This project is unfinished. I could not find a way to securely communicate between Android Keystore and its iOS equivalent, and other projects have taken priority.
 
-## Danish-English Translation with Maximum EL2 Defense
+The components below describe the repository's scope, not a finished or independently verified secure product. Cross-platform key handling remains unresolved. Existing implementation reports and build guides should be read in that context.
 
-### Build Status
+## Contents
 
-[![Docker CI Build](https://github.com/SWORDIntel/SWORDCOMM/actions/workflows/docker-ci.yml/badge.svg)](https://github.com/SWORDIntel/SWORDCOMM/actions/workflows/docker-ci.yml)
-[![Docker Release](https://github.com/SWORDIntel/SWORDCOMM/actions/workflows/docker-release.yml/badge.svg)](https://github.com/SWORDIntel/SWORDCOMM/actions/workflows/docker-release.yml)
-[![Security Scanning](https://github.com/SWORDIntel/SWORDCOMM/actions/workflows/security-scan.yml/badge.svg)](https://github.com/SWORDIntel/SWORDCOMM/actions/workflows/security-scan.yml)
-[![Nightly Build](https://github.com/SWORDIntel/SWORDCOMM/actions/workflows/nightly-build.yml/badge.svg)](https://github.com/SWORDIntel/SWORDCOMM/actions/workflows/nightly-build.yml)
+- [Messaging and project features](#messaging-and-project-features)
+- [Security and privacy limitations](#security-and-privacy-limitations)
+- [Platform and development setup](#platform-and-development-setup)
+- [Build and install](#build-and-install)
+- [Translation](#translation)
+- [Repository layout](#repository-layout)
+- [Testing and troubleshooting](#testing-and-troubleshooting)
+- [Documentation](#documentation)
+- [Contributing and support](#contributing-and-support)
+- [License and acknowledgments](#license-and-acknowledgments)
 
-### Legacy Status
+## Messaging and project features
 
-[![Test](https://github.com/mollyim/mollyim-android/workflows/Test/badge.svg)](https://github.com/mollyim/mollyim-android/actions)
-[![Reproducible build](https://github.com/mollyim/mollyim-android/actions/workflows/reprocheck.yml/badge.svg)](https://github.com/mollyim/mollyim-android/actions/workflows/reprocheck.yml)
-[![Translation status](https://hosted.weblate.org/widgets/molly-instant-messenger/-/svg-badge.svg)](https://hosted.weblate.org/engage/molly-instant-messenger/?utm_source=widget)
+### Messaging foundation
 
-A security-hardened fork of Molly (Signal fork) that adds real-time Danish-to-English translation while defending against nation-state level EL2 hypervisor surveillance.
+The Android app builds on the Molly/Signal codebase, including its messaging, conversation and calling infrastructure. The app and Signal service code live in [app/](app/) and [libsignal-service/](libsignal-service/).
 
-### Project Status
+SWORDCOMM-specific additions are experimental. The upstream foundation does not establish the security or compatibility of this fork's changes.
 
-![Security Status](https://img.shields.io/badge/Security-Maximum-red)
-![Platform](https://img.shields.io/badge/Platform-Android%2010%2B-green)
-![Device](https://img.shields.io/badge/Device-Pixel%206A%2F8A-blue)
-![Encryption](https://img.shields.io/badge/Encryption-Post--Quantum-purple)
-![Build System](https://img.shields.io/badge/Build-Docker-blue)
-![CI/CD](https://img.shields.io/badge/CI%2FCD-GitHub%20Actions-green)
+### Cryptography and key handling
 
----
+The [security library](security-lib/) contains ML-KEM-1024 and ML-DSA-87 integration paths using liboqs, alongside test implementations. Its CMake configuration selects between them through `PRODUCTION_CRYPTO`.
 
-## ⚠️ SECURITY WARNING
+**Test cryptography is not suitable for real communication.** The name “production” identifies a build mode, not a security certification or a statement that the project is ready to deploy. See the [crypto build guide](BUILD_GUIDE.md) and [crypto upgrade notes](CRYPTO_UPGRADE.md).
 
-This application implements aggressive countermeasures against sophisticated surveillance. It is designed for users under active nation-state surveillance with confirmed EL2 (hypervisor-level) compromise.
+Secure communication and key handling across the Android and iOS versions remain unfinished, as described above.
 
-**This system will:**
+### Device-security experiments
 
-- Consume significant battery (up to 33% reduction in battery life)
-- Generate substantial heat (up to 45°C device temperature)
-- Use considerable system resources (45% CPU at maximum threat level)
-- Create extensive network traffic for obfuscation
+Native components explore hypervisor-related signals, performance counters, cache behavior, memory scrambling and timing obfuscation. Other components generate decoy activity and noise.
 
----
+These are research components, not a guarantee of detecting or defeating a compromised operating system or hypervisor. Their presence in the repository does not demonstrate protection against a particular attacker.
 
-## 🎯 Key Features
+### Input protection
 
-### Translation Capabilities
+The project includes work on an input-security wrapper for FlorisBoard and FUTO Voice Input, with timing randomization and threat-response integration. Treat this as part of the unfinished integration work, rather than a drop-in assurance that keyboard or voice input is protected.
 
-- **Real-time Danish-to-English translation** using quantized MarianMT/OPUS models
-- **On-device inference** with INT8 quantization for efficiency
-- **Automatic fallback** - seamlessly switches between network and on-device translation
-- **Network offloading** to local Linux servers via Kyber-1024 post-quantum encryption
-- **Translation caching** with encrypted storage
-- **Offline operation** - fully functional without network connectivity
+Translation is a secondary feature and is described [below](#translation).
 
-### Security Features
+## Security and privacy limitations
 
-- **EL2 Hypervisor Detection** using hardware performance counters
-- **Multi-vector threat analysis** with 99% detection accuracy
-- **Adaptive countermeasures** scaling from 10% to 200% chaos intensity
-- **Memory protection** with secure wiping and scrambling
-- **Cache poisoning** to disrupt side-channel attacks
-- **Timing obfuscation** to prevent timing analysis
-- **Decoy operations** generating fake translations at 10-90% ratio
-- **Hypervisor Timing Chaos** - Advanced EL2 disruption techniques
-- **Security Keyword Embedding** - Realistic noise patterns with intelligence/government keywords
-- **Screen Click Tracking** - User interaction data embedded in noise patterns
+- **Do not rely on this unfinished project for sensitive communications.** Cross-platform key handling, integration and security validation still need work.
+- Experimental countermeasures can increase CPU use, battery drain, device heat and network traffic. More aggressive settings should not be interpreted as proven stronger protection.
+- The security experiments do not make a compromised device trustworthy.
+- Noise-generation code includes screen-coordinate tracking and keyword embedding. Review these behaviors before enabling them; noise generation is not a substitute for encryption or access control.
+- Test crypto and placeholder implementations must not be confused with functioning security features.
+- A successful build or passing test is not a security audit. The [security audit checklist](docs/SECURITY_AUDIT_CHECKLIST.md) and [hardening plan](docs/PRODUCTION_HARDENING_PLAN.md) describe further review work.
 
-### Input Security
+## Platform and development setup
 
-- **Security wrapper** for FlorisBoard and FUTO Voice Input
-- **No source modification** of underlying input methods required
-- **Real-time threat response** during text input
-- **Keystroke timing randomization**
+The native security module currently targets **ARM64 (`arm64-v8a`)**. Earlier project work focused on Pixel 6A and Pixel 8A devices; this is not a compatibility guarantee for those or other devices.
 
-### Network Security
+For local builds, consult the actual [Gradle constants](constants.gradle.kts) and [security-module configuration](security-lib/build.gradle.kts), which take precedence over older setup notes. The checked-in configuration specifies Java 17, NDK 28.0.13004108 and CMake 3.22.1 for the security module.
 
-- **Kyber-1024 post-quantum key exchange**
-- **Forward secrecy** with 5-minute key rotation
-- **mDNS service discovery** for local translation servers
-- **End-to-end encryption** with AES-256-GCM + HMAC-SHA256
+Build and signing guides:
 
----
+| Route | Start here |
+| --- | --- |
+| Docker-based build | [Docker build guide](DOCKER_BUILD.md) |
+| Local Android toolchain | [Android build setup](ANDROID_BUILD_SETUP.md) |
+| Signing and upstream build background | [Building and self-signing](BUILDING.md) |
 
-## 📱 Supported Devices
+Some files still use the names Molly or EMMA. They refer to the upstream base or earlier project naming.
 
-### Primary Targets
+## Build and install
 
-- **Google Pixel 6A** (Tensor G1, 3.2 TOPS NPU)
-- **Google Pixel 8A** (Tensor G3, 5.1 TOPS NPU)
+These commands are development entry points, not a tested release procedure.
 
-### Minimum Requirements
-
-- Android 10 (API 29) or higher
-- ARM64-v8a architecture
-- 4GB RAM minimum
-- 500MB free storage
-
----
-
-## 🚀 Installation
-
-### Prerequisites
-
-1. **Enable Developer Options** on your device
-2. **Enable USB Debugging**
-3. **Install Android SDK** on your computer
-4. **Download dependencies:**
-
-   ```bash
-   # FlorisBoard from F-Droid
-   wget https://f-droid.org/repo/dev.patrickgold.florisboard_xxx.apk
-
-   # FUTO Voice from GitHub
-   wget https://github.com/futo/voice-input/releases/download/v1.2/futo-voice-input.apk
-   ```
-
-### Quick Installation
+### Get the source
 
 ```bash
-# Clone repository
-git clone https://github.com/yourusername/molly-security-translation.git
-cd molly-security-translation
-
-# Run deployment script
-./deploy.sh full
+git clone https://github.com/SWORDOps/SWORDCOMM.git
+cd SWORDCOMM
 ```
 
-### Manual Installation
+### Docker build
 
-1. **Generate encryption keys** (on air-gapped machine):
-
-   ```bash
-   ./scripts/generate_keys.sh
-   # Archive SHA256 output on paper
-   ```
-
-2. **Build APK:**
-
-   ```bash
-   ./gradlew assembleSecurity
-   ```
-
-3. **Install dependencies:**
-
-   ```bash
-   adb install deps/florisboard-0.3.16.apk
-   adb install deps/futo-voice-1.2.apk
-   ```
-
-4. **Install security wrapper:**
-
-   ```bash
-   adb install output/molly-security-1.0.0.apk
-   ```
-
-5. **Configure as primary IME:**
-
-   ```bash
-   adb shell ime enable im.molly.security/.MollySecureInputMethodService
-   adb shell ime set im.molly.security/.MollySecureInputMethodService
-   ```
-
-6. **Download translation models:**
-
-   ```bash
-   ./scripts/download_models.sh
-   adb push models/opus-mt-da-en-int8.bin /sdcard/Android/data/im.molly.security/files/models/
-   ```
-
----
-
-## ⚙️ Configuration
-
-### Security Levels
-
-Configure threat response in `Settings > Security`:
-
-| Threat Level | Chaos | Decoys | Memory | Cache | Network | Action |
-|-------------|-------|--------|---------|--------|----------|---------|
-| 0-35% | 10 | 10% | No | No | No | Baseline monitoring |
-| 35-65% | 60 | 30% | Yes | No | No | Enhanced protection |
-| 65-85% | 100 | 50% | Yes | Yes | No | High security mode |
-| 85-95% | 150 | 70% | Yes | Yes | Yes | Maximum disruption |
-| 95-100% | 200 | 90% | Yes | Yes | Yes | Nuclear protocol |
-
-### Intimate Protection Mode
-
-For protecting specific conversations:
-
-1. **Long-press** contact name in Molly
-2. Select **"Enable Intimate Protection"**
-3. System will apply maximum security for this conversation only
-4. Other conversations remain at normal security levels
-
-### Translation Strategy
-
-Configure translation behavior in `Settings > Translation`:
-
-**Network-First (Default)**: Attempts network translation first, falls back to on-device if unavailable
-
-- Best for: Users with reliable internet connection
-- Quality: Highest (server has more resources)
-- Privacy: Moderate (encrypted local network only)
-
-**On-Device-First**: Attempts on-device translation first, falls back to network if needed
-
-- Best for: Privacy-conscious users, unreliable network
-- Quality: Good (INT8 quantized model)
-- Privacy: Maximum when on-device succeeds
-
-**On-Device-Only**: Only uses on-device translation, never connects to network
-
-- Best for: Air-gapped devices, maximum privacy
-- Quality: Good (INT8 quantized model)
-- Privacy: Maximum (no network exposure)
-
-### Network Offloading
-
-To use a Linux server for translation:
-
-1. **Install server** on Linux machine:
-
-   ```bash
-   cd server/
-   ./install_server.sh
-   ./start_server.sh
-   ```
-
-2. **Verify discovery** on phone:
-
-   ```
-   Settings > Translation > Network Servers
-   ```
-
-3. Server will appear automatically via mDNS
-
-**Note**: Network translation automatically falls back to on-device if server is unavailable
-
----
-
-## 🔬 Testing
-
-### Security Tests
+Install Docker and Docker Compose, then use the checked-in wrapper:
 
 ```bash
-# Run comprehensive security tests
-./test_security.py DEVICE_SERIAL
-
-# Test EL2 detection
-adb shell am broadcast -a im.molly.security.TEST_EL2
-
-# Simulate threat levels
-./deploy.sh threat 50  # 50% threat level
-./deploy.sh threat 85  # 85% threat level
-```
-
-### Performance Monitoring
-
-```bash
-# Start performance monitoring
-./deploy.sh monitor
-
-# View real-time metrics
-tail -f output/performance_*.log
-```
-
-### Translation Testing
-
-```bash
-# Test Danish-English translation
-echo "Hej verden, hvordan har du det?" | ./test_translation.sh
-```
-
----
-
-## 📊 Performance Metrics
-
-### Pixel 8A (Tensor G3)
-
-| Metric | Baseline | Maximum Defense | Impact |
-|--------|----------|-----------------|--------|
-| CPU Usage | 10% | 45% | +35% |
-| Memory | 200MB | 4GB | +3.8GB |
-| Battery Life | 24hr | 16hr | -33% |
-| Temperature | 32°C | 42°C | +10°C |
-| Translation | 50ms | 200ms | +150ms |
-
-### Pixel 6A (Tensor G1)
-
-| Metric | Baseline | Maximum Defense | Impact |
-|--------|----------|-----------------|--------|
-| CPU Usage | 12% | 55% | +43% |
-| Memory | 250MB | 3GB | +2.75GB |
-| Battery Life | 22hr | 14hr | -36% |
-| Temperature | 33°C | 44°C | +11°C |
-| Translation | 100ms | 400ms | +300ms |
-
----
-
-## 🛡️ Security Architecture
-
-### Detection Systems
-
-- **Hardware Performance Counters**: 8 simultaneous counters
-- **Timing Analysis**: Microsecond-precision deviation detection
-- **Memory Forensics**: Pattern analysis with 85% accuracy
-- **Cache Monitoring**: L1/L2/L3 miss rate analysis
-- **Network Behavior**: Packet timing correlation
-
-### Countermeasure Effectiveness
-
-- **Detection Rate**: 99% for EL2 presence
-- **Data Exfiltration Degradation**: 90-97%
-- **Timing Analysis Disruption**: 87-93% variance
-- **Cache Attack Prevention**: 88-94% effectiveness
-- **Memory Forensics Resistance**: 85-92% obfuscation
-- **Hypervisor Timing Disruption**: 95-99% effectiveness at maximum chaos
-- **Noise Generation Volume**: 10-100x baseline at high threat levels
-
-### Hypervisor Disruption Techniques
-
-The system implements comprehensive **Timing Chaos** attacks designed to maximize disruption of EL2 hypervisor monitoring:
-
-#### Clock Source Manipulation
-
-- **Clock Read Flooding**: Overwhelm virtualized CNTVCT_EL0 with rapid timestamp reads
-- **Clock Source Chaos**: Rapid switching between CLOCK_MONOTONIC, CLOCK_REALTIME, CLOCK_BOOTTIME
-- **Clock Skew Injection**: Inject timing variance to confuse hypervisor consistency checks
-- **Timestamp Flooding**: Batch timestamp sampling to force hypervisor timer virtualization
-
-#### Timer Flooding
-
-- **Timer Arm/Disarm Flood**: Rapid timer arm/disarm cycles forcing frequent hypervisor traps
-- **Short Timeout Flood**: Nanosecond-level timeout flooding (1ns minimum)
-- **Timer Interrupt Chaos**: Variable timer interrupt generation patterns
-- **Nanosleep Flood**: High-frequency nanosleep calls with random durations
-
-#### Scheduling Disruption
-
-- **CPU Affinity Chaos**: Rapid CPU affinity changes forcing hypervisor rescheduling
-- **Priority Manipulation**: Nice value changes to confuse priority monitoring
-- **Yield Chaos**: Unpredictable yield/sleep patterns
-- **Thread Flood**: Short-lived thread spawn/destroy cycles
-- **Futex Timing Chaos**: Futex-based timing manipulation
-
-#### Speculative Timing Attacks
-
-- **Branch Timing Flood**: Unpredictable branch patterns confusing branch predictor monitoring
-- **Pipeline Stall Chaos**: Memory barrier patterns causing pipeline stalls
-- **Speculative Timing Noise**: Speculative execution timing variance
-
-#### Memory Timing Attacks
-
-- **Cache Timing Noise**: Cache line access timing patterns
-- **Row Hammer Timing**: DRAM row timing patterns
-- **DRAM Refresh Interference**: Memory access patterns interfering with DRAM refresh
-- **Memory Timing Variance**: Variable memory access timing injection
-
-#### Syscall Timing Attacks
-
-- **Syscall Flood**: High-frequency lightweight syscalls (getpid, gettid, sched_yield)
-- **Syscall Timing Variance**: Variable syscall timing patterns
-- **Gettime Flood**: clock_gettime flooding forcing hypervisor timer virtualization
-
-#### Combined Attack Modes
-
-- **Maximum Timing Chaos**: All techniques simultaneously ("nuclear option")
-- **Continuous Timing Chaos**: Burst mode with "gallop dash" TTP (10x intensity multiplier)
-- **Adaptive Timing Chaos**: Self-adjusting intensity based on detected hypervisor response
-
-### Security Keyword Embedding
-
-Noise generation and decoy patterns embed comprehensive security-related keywords to create realistic-looking data:
-
-- **Intelligence Agencies**: GCHQ, NSA, FSB, CIA, MI6, MI5, BND, DGSE, MSS, Mossad, RAW, ISI, SVR, GRU, FBI, DHS, NRO, NGA, DIA, ONI, and more
-- **Threat Actors**: SHINYHUNTERS, SHINY, APT groups (APT1, APT28, APT29), Lazarus, Fancy Bear, Cozy Bear, Equation Group, Stuxnet, Flame, Turla, Sandworm, BlackEnergy
-- **Government Entities**: DOD, Pentagon, White House, Kremlin, Downing Street, Elysée, Bundestag, Knesset, Capitol Hill, Langley, Fort Meade, Cheltenham, Menwith Hill
-- **Security Terms**: EL2, hypervisor, surveillance, SIGINT, COMINT, ELINT, MASINT, HUMINT, OSINT, GEOINT, PRISM, XKeyscore, TEMPEST, ECHELON, Carnivore, Stingray, IMSI catcher
-- **NATO Terms**: Comprehensive NATO keywords including commands (SHAPE, ACT, ACO, JFC), operations, facilities, member countries, exercises, intelligence structures, cyber commands, communications systems, missile defense, air/maritime/ground forces, special operations, partnerships, classifications, and more
-- **Scottish Military/Intelligence**: Faslane, HMNB Clyde, Coulport, RAF Lossiemouth, RAF Leuchars, GCHQ facilities, nuclear facilities (Dounreay, Trident, Vanguard), CBRN terms, Scottish military units, operations, and locations
-- **Additional Terms**: Zero-day, exploit, backdoor, trojan, malware, APT, nation-state, cyber warfare, information warfare, PSYOP, COINTELPRO, classification markings (CLASSIFIED, TOP SECRET, SECRET, CONFIDENTIAL, NOFORN, EYES ONLY)
-
-Keywords are embedded with variations (uppercase, lowercase, mixed case) and mixed with random data to avoid detection by basic auto-filters.
-
-### Screen Click Coordinate Tracking
-
-The system tracks user screen click/touch coordinates (X, Y positions) and embeds them into noise patterns:
-
-- Coordinates embedded as both ASCII text ("X:1234 Y:5678") and binary formats
-- Mixed with security keywords and random data
-- Provides additional realistic data points in noise generation
-- Thread-safe coordinate storage and retrieval
-
----
-
-## 🔧 Development
-
-### Building from Source
-
-#### Requirements
-
-- Android Studio Arctic Fox or later
-- NDK r25 or later
-- CMake 3.22+
-- Java 17+
-
-#### Build Steps
-
-```bash
-# Set up environment
-export ANDROID_HOME=/path/to/android-sdk
-export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/25.2.9519653
-
-# Build debug version
-./gradlew assembleDebug
-
-# Build release version
-./gradlew assembleRelease
-
-# Run tests
-./gradlew test
-./gradlew connectedAndroidTest
-```
-
-#### Docker Build (Recommended)
-
-For a reproducible, isolated build environment without installing Android SDK/NDK locally:
-
-```bash
-# Quick start - build debug APK
 ./build.sh debug
+./build.sh test
+```
 
-# Build production release with post-quantum crypto
+The wrapper also exposes a release build using the liboqs configuration:
+
+```bash
 ./build.sh release --production
+```
 
-# Build all variants
-./build.sh full
+See [DOCKER_BUILD.md](DOCKER_BUILD.md) for build variants, environment variables and output locations. APK outputs are under `app/build/outputs/apk/`.
 
-# Start translation server
+### Local build and device installation
+
+Set up the Android SDK, NDK and Java toolchain using [ANDROID_BUILD_SETUP.md](ANDROID_BUILD_SETUP.md). Then inspect the available tasks and build the desired variant:
+
+```bash
+./gradlew tasks
+./gradlew assembleDebug
+```
+
+Use a test device with USB debugging enabled. Install the APK produced for your selected variant, replacing the path below:
+
+```bash
+adb install path/to/your-built.apk
+```
+
+Release APKs require signing; see [BUILDING.md](BUILDING.md). Protect signing keys and do not commit them. Installing a self-signed fork can affect update compatibility with upstream apps.
+
+## Translation
+
+Danish-to-English translation is an additional project area, not the primary purpose of SWORDCOMM.
+
+The design includes MarianMT/OPUS models, local inference, caching and an optional Linux translation server. **The checked-in native [translation engine](translation-lib/src/main/cpp/translation_engine.cpp) currently uses a stub that prefixes text with `[DA->EN]`; it does not perform the documented model inference.** Do not treat that output as a translation.
+
+The documented configuration distinguishes network-first, on-device-first and on-device-only strategies. Those describe the intended routing behavior, not evidence that every path is complete.
+
+The [server directory](server/) and Docker wrapper provide the server-side starting point:
+
+```bash
 ./build.sh server
-
-# Interactive development shell
-./build.sh dev
+./build.sh server-test
+./build.sh server-stop
 ```
 
-See **[Docker Build Guide](DOCKER_BUILD.md)** for complete documentation including:
+Network translation involves sending text to a server. Review the implementation and configuration before using it with private content. Offline translation, where implemented, is separate from messaging connectivity.
 
-- Configuration options
-- Build variants
-- APK signing
-- Production crypto setup
-- CI/CD integration
+## Repository layout
 
-### Project Structure
+| Path | Purpose |
+| --- | --- |
+| [app/](app/) | Android application and integration |
+| [libsignal-service/](libsignal-service/) | Signal service layer |
+| [security-lib/](security-lib/) | Native security experiments, cryptography and Android bindings |
+| [translation-lib/](translation-lib/) | Translation interfaces and native engine |
+| [server/](server/) | Translation server |
+| [scripts/](scripts/) | Build and supporting scripts |
+| [docs/](docs/) | Implementation notes, plans and review checklists |
+| [build.sh](build.sh) | Docker build and server commands |
 
-```
-EMMA-android/
-├── app/                    # Main application module
-│   ├── src/
-│   │   ├── main/
-│   │   │   ├── java/      # Kotlin/Java source
-│   │   │   ├── cpp/       # Native C++ code
-│   │   │   └── res/       # Resources (mil-spec theme)
-│   │   └── test/          # Unit tests (15+ security tests)
-├── security-lib/          # Security components
-│   ├── src/main/cpp/      # EL2 detection, Kyber-1024, countermeasures, hypervisor disruptor
-│   │   ├── el2_detector.cpp/h          # EL2 hypervisor detection
-│   │   ├── hypervisor_disruptor.cpp/h  # Timing chaos disruption techniques
-│   │   ├── cache_operations.cpp/h      # Cache poisoning and noise generation
-│   │   ├── memory_scrambler.cpp/h      # Memory scrambling and decoy patterns
-│   │   ├── timing_obfuscation.cpp/h    # Timing obfuscation
-│   │   ├── security_keywords.cpp/h    # Security keyword database
-│   │   └── performance_counters.cpp/h  # Hardware performance counter access
-│   └── src/main/java/     # Kotlin wrappers
-│       ├── EL2Detector.kt              # Hypervisor detection
-│       ├── HypervisorDisruptor.kt      # Timing chaos attacks
-│       ├── CacheOperations.kt          # Cache operations
-│       ├── MemoryScrambler.kt          # Memory operations
-│       ├── ScreenClickTracker.kt       # Screen coordinate tracking
-│       └── AdaptiveCountermeasures.kt  # Threat-based response coordination
-├── translation-lib/       # Translation engine
-│   ├── src/main/cpp/      # Translation engine (C++)
-│   └── src/main/java/     # Network client, cache
-├── deps/                  # External dependencies
-├── models/                # Translation models (auto-downloaded)
-├── scripts/               # Build and deployment scripts
-├── server/                # Python translation server
-└── docs/                  # Technical documentation
-    ├── FINAL_IMPLEMENTATION_REPORT.md
-    ├── IMPLEMENTATION_STATUS.md
-    └── IOS_PORT_ROADMAP.md
-```
+## Testing and troubleshooting
 
----
+For unit tests through Docker, use `./build.sh test`. For local Gradle tests, select the tasks appropriate to your build variant; device tests require a connected Android device.
 
-## 🚨 Troubleshooting
+When reporting a build problem, include the commit, build command, toolchain versions and relevant error output. Redact credentials, signing information and private message content.
 
-### Common Issues
+- **Build or liboqs failures:** check [DOCKER_BUILD.md](DOCKER_BUILD.md) and [BUILD_GUIDE.md](BUILD_GUIDE.md), and confirm which crypto implementation the build selected.
+- **Heat or battery drain:** stop the experiment or disable the optional countermeasures; do not assume resource use demonstrates protection.
+- **Translation output unchanged except for a prefix:** this is the native stub behavior described above, not a model-download issue.
+- **Installation or update conflicts:** check the application ID, build variant and signing key against the installed app.
 
-#### High Battery Drain
+## Documentation
 
-- Reduce chaos level in Settings
-- Disable intimate protection when not needed
-- Use network offloading instead of on-device translation
+| Guide | Scope |
+| --- | --- |
+| [Docker build guide](DOCKER_BUILD.md) | Container builds, variants and server commands |
+| [Android build setup](ANDROID_BUILD_SETUP.md) | Local toolchain setup |
+| [Building and self-signing](BUILDING.md) | Signing and upstream build background |
+| [Crypto build guide](BUILD_GUIDE.md) | liboqs and test-mode configuration |
+| [CI/CD documentation](CI_CD.md) | Existing workflow documentation |
+| [Implementation report](docs/FINAL_IMPLEMENTATION_REPORT.md) | Historical implementation notes |
+| [Implementation status](docs/IMPLEMENTATION_STATUS.md) | Historical tracking |
+| [Hardening plan](docs/PRODUCTION_HARDENING_PLAN.md) | Further security work |
+| [Security audit checklist](docs/SECURITY_AUDIT_CHECKLIST.md) | Review checklist |
+| [iOS port roadmap](docs/IOS_PORT_ROADMAP.md) | Historical porting plans |
+| [iOS repository](https://github.com/SWORDOps/Swordcomm-IOS) | Separate iOS implementation |
 
-#### Device Overheating
+Historical reports may describe goals or completion claims that do not reflect the unfinished status or current code. Check the implementation before relying on them.
 
-- System automatically reduces chaos at 45°C
-- Move to cooler environment
-- Reduce security level temporarily
+## Contributing and support
 
-#### Translation Failures
+Use [this repository's issues](https://github.com/SWORDOps/SWORDCOMM/issues) for non-sensitive bugs and feature discussions. Include reproducible steps and distinguish upstream Molly/Signal behavior from SWORDCOMM-specific changes.
 
-- Check model file integrity
-- Verify sufficient storage space
-- Restart translation service
-- If network translation fails, system automatically falls back to on-device
-- Switch to "On-Device-Only" mode in Settings > Translation for offline operation
+Useful areas for review include cross-platform key handling, integration tests, the security experiments, build reproducibility and unfinished translation paths. This is not a commitment to a release schedule.
 
-#### Input Method Not Working
+Do not post private keys, credentials, private messages or sensitive vulnerability details in public issues.
 
-- Verify FlorisBoard is installed
-- Check IME configuration
-- Reset input method settings
+## License and acknowledgments
 
----
+This project is licensed under the **GNU AGPLv3**. See [LICENSE](LICENSE) and [NOTICE](NOTICE) for the applicable terms and notices.
 
-## ⚖️ Legal Notice
+This software is provided for educational and research purposes, without warranty. It contains cryptographic components; users are responsible for complying with applicable laws and export restrictions.
 
-This software is provided for educational and research purposes only. Users are responsible for complying with all applicable laws and regulations in their jurisdiction.
+SWORDCOMM builds on work by Signal and Molly contributors, with cryptography integration using Open Quantum Safe/liboqs and translation work based on Helsinki-NLP/OPUS-MT and MarianMT.
 
-**Export Control**: This software includes cryptographic components that may be subject to export restrictions.
-
-**No Warranty**: This software is provided "as is" without warranty of any kind.
-
----
-
-## 📚 Documentation
-
-### Quick Links
-
-- **[Docker Build Guide](DOCKER_BUILD.md)** - Dockerized build system (recommended)
-- **[CI/CD Documentation](CI_CD.md)** - GitHub Actions workflows and automation
-- **[Building from Source](BUILDING.md)** - Detailed build instructions
-- **[Production Build Guide](BUILD_GUIDE.md)** - Production crypto configuration
-- **[iOS Version](README-iOS.md)** - EMMA for iOS/Signal-iOS
-- **[Implementation Report](docs/FINAL_IMPLEMENTATION_REPORT.md)** - Complete Phase 3 report
-- **[iOS Port Roadmap](docs/IOS_PORT_ROADMAP.md)** - iOS porting strategy (160+ pages)
-
-### Documentation Structure
-
-```
-EMMA-android/
-├── README.md                           # This file (Android)
-├── README-iOS.md                       # iOS version README
-├── DOCKER_BUILD.md                     # Docker build system guide
-├── CI_CD.md                            # CI/CD workflows documentation
-├── BUILDING.md                         # Build instructions
-├── BUILD_GUIDE.md                      # Production crypto build guide
-├── build.sh                            # Docker build wrapper script
-├── docker-compose.yml                  # Docker orchestration
-├── .github/workflows/                  # GitHub Actions CI/CD
-│   ├── docker-ci.yml                   # Main CI build workflow
-│   ├── docker-release.yml              # Release workflow
-│   ├── security-scan.yml               # Security scanning
-│   └── nightly-build.yml               # Nightly builds
-└── docs/
-    ├── FINAL_IMPLEMENTATION_REPORT.md  # 100% implementation report
-    ├── IMPLEMENTATION_STATUS.md        # Historical tracking
-    └── IOS_PORT_ROADMAP.md             # iOS port technical plan
-```
-
-For detailed technical documentation, see the **[docs/](docs/)** directory.
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-### Security Disclosure
-
-Report security vulnerabilities via encrypted email to: <security@example.org>
-
-GPG Key: `0x1234567890ABCDEF`
-
-- [Submit bugs and feature requests](https://github.com/mollyim/mollyim-android/issues) on GitHub
-- Join us at [#mollyim:matrix.org](https://matrix.to/#/#mollyim:matrix.org) on Matrix (via space: [#mollyim-space:matrix.org](https://matrix.to/#/#mollyim-space:matrix.org))
-- For news, tips, and tricks, follow [@mollyim](https://fosstodon.org/@mollyim) on Mastodon
-
----
-
-## 📜 License
-
-This project is licensed under the GNU AGPLv3 License - see [LICENSE](LICENSE) for details.
-
-### Acknowledgments
-
-- Signal Foundation for the original Signal application
-- Molly contributors for the security-hardened fork
-- Helsinki NLP for OPUS-MT translation models
-- MarianMT team for the translation framework
-
----
-
-## 📞 Support
-
-- **Documentation**: [docs.example.org](https://docs.example.org)
-- **Issues**: [GitHub Issues](https://github.com/yourusername/molly-security-translation/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/molly-security-translation/discussions)
-
----
-
-## 🔄 Version History
-
-### v1.0.0 (Current)
-
-- Initial release with Danish-English translation
-- EL2 detection and countermeasures
-- Input security wrapper
-- Kyber post-quantum encryption
-- **Hypervisor Timing Chaos** - Advanced EL2 disruption techniques
-- **Security Keyword Embedding** - Comprehensive keyword database (intelligence agencies, threat actors, NATO, Scottish military, CBRN terms)
-- **Screen Click Tracking** - User interaction data embedded in noise
-- **"Bury Them With Bullshit" Strategy** - 10-100x noise generation at high threat levels
-- **"Gallop Dash" TTP** - Rapid burst generation mode (10x intensity multiplier)
-
-### Roadmap
-
-- [x] Automatic offline translation fallback
-- [x] Configurable translation strategies
-- [ ] Additional language pairs
-- [ ] Enhanced NPU acceleration
-- [ ] Improved battery optimization
-- [ ] Advanced threat detection ML models
-
-<div align="center">
-<table>
-<tr>
-  <td>
-    <a href="https://nlnet.nl/" target="_blank">
-      <img src="https://nlnet.nl/logo/banner.svg" alt="NLnet logo" height="56" />
-    </a>
-  </td>
-  <td>
-    <a href="https://bahnhof.cloud/en/" target="_blank">
-      <img src="https://upload.wikimedia.org/wikipedia/de/c/c0/Bahnhof_AB_logo.svg" alt="Bahnhof logo" height="56" />
-    </a>
-  </td>
-  <td>
-    <a href="https://cloudsmith.com/blog/cloudsmith-loves-opensource/" target="_blank">
-      <img src="https://raw.githubusercontent.com/opswithranjan/CloudsmithLogo/main/CloudsmithLogoCropped.jpeg" alt="Cloudsmith logo" height="32" />
-    </a>
-  </td>
-  <td>
-    <a href="https://www.jetbrains.com/community/opensource/" target="_blank">
-      <img src="https://resources.jetbrains.com/storage/products/company/brand/logos/jetbrains.svg" alt="JetBrains logo" height="32" />
-    </a>
-  </td>
-</tr>
-</table>
-</div>
-
----
-
-**Remember**: This system is designed for users under active surveillance. The aggressive countermeasures are intentional and necessary for protection against sophisticated adversaries.
-
-**Stay Safe. Stay Secure.**
+- [Molly upstream](https://github.com/mollyim/mollyim-android)
+- [Signal Android upstream](https://github.com/signalapp/Signal-Android)
+- [SWORDCOMM for iOS](https://github.com/SWORDOps/Swordcomm-IOS)
